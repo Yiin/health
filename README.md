@@ -171,6 +171,16 @@ the UI can link out. An existing insight for the document makes the insert a
 no-op, so a retried stage never doubles it; wearable/activity documents get
 no insight in v1.
 
+### Live Kimi smoke eval
+
+`scripts/kimi-smoke.ts` ingests the synthetic samples in
+`fixtures/health-docs/` (LT + EN lab PDFs, wearable CSV, scanned PDF) through
+the real classify/extract/normalize stages against the **live** Kimi API and
+prints classification, extracted records vs ground truth, token cost, and
+latency. Manual runs only (the API costs money); see `docs/kimi-eval.md` for
+the runbook and the 2026-07-18 findings (LT extraction excellent; scanned
+image-only PDFs need the vision fallback; Tier0 queue copes).
+
 ## Documents library
 
 `/documents` lists every uploaded file as cards (AI summary, type/provider,

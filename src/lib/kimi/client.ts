@@ -289,12 +289,25 @@ export interface JsonSchemaDefinition {
   strict?: boolean;
 }
 
+/** Token usage of one completion, as reported by the API. */
+export interface KimiUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface ChatStructuredParams {
   /** Passed through as response_format.json_schema. */
   schema: JsonSchemaDefinition;
   messages: ChatCompletionMessageParam[];
   /** Defaults to KIMI_MODELS.chat; pass KIMI_MODELS.expert for escalations. */
   model?: string;
+  /**
+   * Observer fired once per successful completion with its token usage
+   * (eval/telemetry). Also fires for completions that are then rejected
+   * (empty content, finish_reason 'length') — those tokens were spent.
+   */
+  onUsage?: (usage: KimiUsage) => void;
 }
 
 /**
@@ -313,6 +326,13 @@ export async function chatStructured(
         messages: params.messages,
         response_format: { type: "json_schema", json_schema: params.schema },
       });
+      if (params.onUsage && completion.usage) {
+        params.onUsage({
+          promptTokens: completion.usage.prompt_tokens,
+          completionTokens: completion.usage.completion_tokens,
+          totalTokens: completion.usage.total_tokens,
+        });
+      }
       const choice = completion.choices[0];
       if (!choice) {
         throw new KimiError(
