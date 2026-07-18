@@ -290,6 +290,23 @@ npm run e2e     # docker compose -p health-e2e -f docker-compose.yml \
 npm run e2e:down   # tear the e2e stack down, volumes included
 ```
 
+For code-change iteration there is a fast host-run variant that skips the
+image build entirely:
+
+```bash
+npm run e2e:fast   # host-spawned next dev + worker + kimi-mock,
+                   # dev compose db/minio as the only containers
+```
+
+`scripts/e2e-fast.mjs` brings up the dev compose `db` and `minio`, creates a
+dedicated `health_e2e` database and `health-e2e` bucket (a running dev stack
+on the `health` database/bucket is untouched), migrates, spawns kimi-mock
+(port 9701), `next dev` (port 3105), and the worker as host processes, then
+runs the same `scripts/e2e-pipeline.mjs` with identical assertions. It needs
+`node_modules` installed and poppler-utils (`pdfinfo`/`pdftoppm`) on the PATH
+for the vision-path fixtures. Use `npm run e2e` for deploy validation — it is
+the only path that builds and exercises the production image.
+
 Coverage (`scripts/e2e-pipeline.mjs`): EN + LT lab PDFs land `done` with
 mapped `biomarker_results` (decimal commas and LT aliases included); a blank
 scanned PDF goes through the vision path, validly yields zero analytes, and
