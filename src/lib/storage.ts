@@ -117,19 +117,27 @@ export async function ensureBucket(): Promise<void> {
   } catch (err) {
     if (!isNotFound(err)) throw err;
   }
-  await client.send(
-    new CreateBucketCommand({
-      Bucket: config.bucket,
-      // us-east-1 is the default region and must not be passed as a constraint.
-      ...(config.region === "us-east-1"
-        ? {}
-        : {
-            CreateBucketConfiguration: {
-              LocationConstraint: config.region as BucketLocationConstraint,
-            },
-          }),
-    }),
-  );
+  try {
+    await client.send(
+      new CreateBucketCommand({
+        Bucket: config.bucket,
+        // us-east-1 is the default region and must not be passed as a constraint.
+        ...(config.region === "us-east-1"
+          ? {}
+          : {
+              CreateBucketConfiguration: {
+                LocationConstraint: config.region as BucketLocationConstraint,
+              },
+            }),
+      }),
+    );
+  } catch (err) {
+    // A concurrent ensureBucket (e.g. parallel test suites) may win the
+    // HeadBucket/CreateBucket race — the bucket exists and is ours, done.
+    if ((err as { name?: string }).name !== "BucketAlreadyOwnedByYou") {
+      throw err;
+    }
+  }
 }
 
 export async function objectExists(s3Key: string): Promise<boolean> {
