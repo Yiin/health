@@ -79,7 +79,20 @@ SHA-256 hash into content-addressed storage (never buffered in memory), the
 document row and its `ingest` job commit in one transaction
 (`src/lib/uploads.ts`), and identical bytes short-circuit as duplicates with
 no new job. `POST /api/documents/[id]/retry` resets a failed/needs_review
-document (attempts preserved) and re-enqueues it.
+document (attempts preserved) and re-enqueues it; an optional JSON body
+`{ "documentType": "…" }` ("Process as…") stores the type hint as a metadata
+override in the same transaction, so the classifier sees it on the re-run.
+
+`/upload` is the drop-anything dropzone (drag-drop or click, per-file XHR
+progress) with a live ingestion feed underneath: it polls
+`GET /api/documents?status=active` every 3 s while any document is
+non-terminal (the response's `hasActive` flag drives the polling), renders
+each document's stage stepper and the classifier's verdict once known, and
+offers Retry / "Process as…" recovery for failed/needs_review documents. A
+condensed version of the same feed (`IngestionStatusStrip`) sits on the
+overview page. The DB only persists the current status, so per-stage
+timestamps are observed client-side at poll granularity
+(`src/lib/ingestion-feed.ts`).
 
 Background jobs use pg-boss on the app Postgres (no Redis): `src/lib/queue.ts`
 holds the shared boss instance used by both the web enqueue path and the

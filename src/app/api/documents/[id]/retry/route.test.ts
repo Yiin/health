@@ -48,6 +48,17 @@ function retry(documentId: string) {
   );
 }
 
+function retryWithBody(documentId: string, body: unknown) {
+  return POST(
+    new Request(`http://localhost/api/documents/${documentId}/retry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    }),
+    { params: Promise.resolve({ id: documentId }) },
+  );
+}
+
 interface RetryJson {
   document?: {
     id: string;
@@ -150,5 +161,54 @@ describe("POST /api/documents/[id]/retry", () => {
 
     const malformed = await retry("not-a-uuid");
     expect(malformed.status).toBe(404);
+  });
+
+  it('"Process as…" stores the type hint and re-enqueues in one call', async () => {
+    const doc = await insertDocumentWithStatus("needs_review");
+
+    const res = await retryWithBody(doc.id, { documentType: "lab_report" });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as RetryJson;
+    expect(body.document?.status).toBe("uploaded");
+    expect(body.enqueued).toBe(true);
+
+    const stored = await getDb().query.documents.findFirst({
+      where: eq(documents.id, doc.id),
+    });
+    expect(stored?.metadataOverrides?.documentType).toBe("lab_report");
+    expect(await ingestJobCount(doc.sha256)).toBe(1);
+  });
+
+  it("treats a JSON body without documentType as a plain retry", async () => {
+    const doc = await insertDocumentWithStatus("failed");
+
+    const res = await retryWithBody(doc.id, {});
+
+    expect(res.status).toBe(200);
+    const stored = await getDb().query.documents.findFirst({
+      where: eq(documents.id, doc.id),
+    });
+    expect(stored?.metadataOverrides).toBeNull();
+  });
+
+  it("400s on a malformed body or an unknown documentType", async () => {
+    const doc = await insertDocumentWithStatus("needs_review");
+
+    const notJson = await retryWithBody(doc.id, "{oops");
+    expect(notJson.status).toBe(400);
+
+    const badType = await retryWithBody(doc.id, { documentType: "novel" });
+    expect(badType.status).toBe(400);
+    expect(((await badType.json()) as RetryJson).error).toContain(
+      "documentType",
+    );
+
+    // A rejected hint must not disturb the document or the queue.
+    const stored = await getDb().query.documents.findFirst({
+      where: eq(documents.id, doc.id),
+    });
+    expect(stored?.status).toBe("needs_review");
+    expect(await ingestJobCount(doc.sha256)).toBe(0);
   });
 });

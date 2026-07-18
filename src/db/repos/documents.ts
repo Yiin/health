@@ -5,13 +5,15 @@
 // from src/db/test-utils.ts. The singleton's type is identical, so route
 // handlers pass getDb() (or an in-transaction handle) directly.
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { effectiveMetadata } from "../../lib/document-metadata";
 import * as schema from "../schema";
 import {
   documents,
+  NON_TERMINAL_STATUSES,
+  TERMINAL_STATUSES,
   type Document,
   type DocumentMetadataOverrides,
   type DocumentStatus,
@@ -239,6 +241,57 @@ export async function updateMetadataOverrides(
     .where(eq(documents.id, documentId))
     .returning();
   return updated[0];
+}
+
+export interface IngestionFeedItem extends DocumentListItem {
+  stageError: DocumentStageError | null;
+  sizeBytes: number | null;
+  /** Results linked to the document (0 until the extraction stage lands). */
+  biomarkerCount: number;
+}
+
+/**
+ * Live ingestion feed for /upload (GET /api/documents?status=active): every
+ * document with a pipeline run still in flight, plus terminal-outcome
+ * documents uploaded within the last `recentHours` (the feed answers "what
+ * happened to the files I just dropped", not "list everything"). Newest
+ * upload first.
+ */
+export async function listIngestionFeed(
+  db: Db,
+  options: { recentHours?: number; limit?: number } = {},
+): Promise<IngestionFeedItem[]> {
+  const rows = await db
+    .select({
+      document: documents,
+      // NB: the correlated reference must spell out "documents"."id" — inside
+      // the subquery a bare "id" would resolve to biomarker_results.id.
+      biomarkerCount:
+        sql<number>`(select count(*)::int from biomarker_results r where r.document_id = "documents"."id")`.as(
+          "biomarker_count",
+        ),
+    })
+    .from(documents)
+    .where(
+      or(
+        inArray(documents.status, [...NON_TERMINAL_STATUSES]),
+        and(
+          inArray(documents.status, [...TERMINAL_STATUSES]),
+          gt(
+            documents.uploadedAt,
+            sql`now() - make_interval(hours => ${options.recentHours ?? 24})`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(documents.uploadedAt))
+    .limit(options.limit ?? 50);
+  return rows.map(({ document, biomarkerCount }) => ({
+    ...toListItem(document),
+    stageError: document.stageError,
+    sizeBytes: document.sizeBytes,
+    biomarkerCount,
+  }));
 }
 
 /** Distinct effective providers, for the filter dropdown. */
