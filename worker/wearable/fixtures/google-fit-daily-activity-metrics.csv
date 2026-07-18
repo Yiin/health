@@ -1,0 +1,4 @@
+Date,Move Minutes count,Calories (kcal),Distance (m),Heart Points,Average heart rate (bpm),Max heart rate (bpm),Min heart rate (bpm),Low latitude (deg),Low longitude (deg),High latitude (deg),High longitude (deg),Average speed (m/s),Max speed (m/s),Min speed (m/s),Step count,Calories (kcal)
+2024-03-01,42,2145,3251.4,4,78,142,54,54.6871,25.2797,54.6912,25.2851,0.8,2.1,0.2,4871,2145
+2024-03-02,67,2380,5412.8,9,81,158,52,54.6821,25.2611,54.6945,25.2902,0.9,2.6,0.2,8123,2380
+2024-03-03,15,1905,1052.1,1,74,121,51,,,,,0.5,1.4,0.1,1532,1905

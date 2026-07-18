@@ -1,0 +1,4 @@
+calendarDate,stepCount,dailyStepGoal,totalDistanceMeters,moderateIntensityMinutes,vigorousIntensityMinutes,floorsAscended,floorsDescended,restingHeartRate,minHeartRate,maxHeartRate,averageStressLevel,maxStressLevel,stressDuration,restStressDuration,activityStressDuration,totalKilocalories,activeKilocalories
+2024-03-01,9234,7500,6821,35,22,6,4,51,44,132,28,85,5400,3200,2200,2560,640
+2024-03-02,12087,7500,8912,42,31,9,7,50,43,148,31,92,6100,2900,3200,2812,982
+2024-03-03,4102,7500,2874,18,5,2,2,52,45,118,24,78,4800,3600,1200,2340,410

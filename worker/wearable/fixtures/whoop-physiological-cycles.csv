@@ -1,0 +1,4 @@
+Cycle start time,Cycle end time,Cycle timezone,Recovery score %,Resting heart rate (bpm),Heart rate variability (ms),Skin temp (celsius),Blood oxygen %,Day Strain,Energy burned (cal),Max HR (bpm),Average HR (bpm),Sleep performance %,Respiratory rate (rpm),Asleep duration (min),In bed duration (min),Light sleep duration (min),Deep (SWS) duration (min),REM duration (min),Awake duration (min),Sleep need (min),Sleep debt (min),Sleep efficiency %
+2024-03-01T06:58:12.000Z,2024-03-02T06:41:55.000Z,Europe/Vilnius,67,52,84,33.1,97,10.4,2385,171,66,88,14.2,415,452,221,98,96,37,480,65,91.8
+2024-03-02T06:41:55.000Z,2024-03-03T06:22:40.000Z,Europe/Vilnius,45,55,61,33.4,96,14.1,2710,184,71,72,14.6,382,430,205,84,93,48,492,110,88.8
+2024-03-03T06:22:40.000Z,2024-03-04T06:50:03.000Z,Europe/Vilnius,81,50,92,32.9,98,8.2,2240,165,63,93,14.0,441,468,238,104,99,27,475,34,94.2
