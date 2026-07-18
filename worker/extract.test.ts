@@ -3,9 +3,10 @@
 //   mocked Kimi (deterministic, derived from what unpdf actually extracted —
 //   see mockKimi), and the real biomarker-results repo, run through
 //   runIngestion together with the normalizing stage.
-// - apple_health_export: routes to the SAX parser, other document types pass
-//   through untouched, and permanent input problems surface as a needs_review
-//   halt payload the stage executor understands.
+// - apple_health_export: routes to the SAX parser (loose export.xml or the
+//   export.zip container), other document types pass through untouched, and
+//   permanent input problems surface as a needs_review halt payload the stage
+//   executor understands.
 // Storage (readBytes/openOriginal) and Kimi are injected, so no MinIO/Kimi is
 // needed; everything runs against the shared health_test database.
 
@@ -21,7 +22,11 @@ import type { ChatStructuredParams } from "../src/lib/kimi/client";
 import { EN_CBC, LT_LAB } from "../fixtures/health-docs/content.mjs";
 
 import { SMALL_EXPORT_XML } from "./apple-health/fixture";
-import { APPLE_HEALTH_PROGRESS_STAGE } from "./apple-health/index";
+import {
+  APPLE_HEALTH_PROGRESS_STAGE,
+  EXPORT_XML_ENTRY,
+} from "./apple-health/index";
+import { buildZip } from "./zip-fixture";
 import { createExtractStage, EXTRACT_PROMPT_V1 } from "./extract";
 import {
   runIngestion,
@@ -639,6 +644,60 @@ describe("createExtractStage", () => {
       select stage from raw_extractions where document_id = ${id}
     `;
     expect(checkpoint.map((r) => r.stage)).toEqual([APPLE_HEALTH_PROGRESS_STAGE]);
+  });
+
+  it("walks an Apple export.zip through the full pipeline to done", async () => {
+    const zip = buildZip([
+      { name: "apple_health_export", data: Buffer.alloc(0), directory: true },
+      { name: EXPORT_XML_ENTRY, data: Buffer.from(SMALL_EXPORT_XML) },
+      {
+        name: "apple_health_export/export_cda.xml",
+        data: Buffer.from("<ClinicalDocument/>"),
+      },
+    ]);
+    const rows = await sql<{ id: string }[]>`
+      insert into documents
+        (sha256, original_filename, s3_key, document_type, size_bytes)
+      values (
+        ${crypto.randomUUID()}, 'export.zip', 'originals/ab/cdef/export.zip',
+        'apple_health_export', ${zip.length}
+      )
+      returning id
+    `;
+    const id = rows[0].id;
+    await sql`
+      insert into raw_extractions (document_id, stage, payload)
+      values (${id}, 'classifying', ${sql.json({ stub: true })})
+    `;
+
+    const outcome = await runIngestion(sql, id, {
+      stages: {
+        ...stubStages,
+        extracting: createExtractStage({
+          sql,
+          openOriginal: () => Promise.resolve(Readable.from([zip])),
+        }),
+      },
+    });
+
+    expect(outcome).toEqual({ kind: "done" });
+    const doc = await sql<{ status: string }[]>`
+      select status from documents where id = ${id}
+    `;
+    expect(doc[0].status).toBe("done");
+    expect(await payloadOf(id, "extracting")).toMatchObject({
+      documentType: "apple_health_export",
+      metrics: 9,
+      workouts: 2,
+    });
+    const metrics = await sql<{ count: number }[]>`
+      select count(*)::int as count from daily_metrics where source = 'apple_health'
+    `;
+    expect(metrics[0].count).toBe(9);
+    const workouts = await sql<{ count: number }[]>`
+      select count(*)::int as count from workouts where source = 'apple_health'
+    `;
+    expect(workouts[0].count).toBe(2);
   });
 
   it("halts needs_review on malformed XML", async () => {

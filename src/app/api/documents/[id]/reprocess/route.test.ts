@@ -14,7 +14,10 @@ import { documents, rawExtractions, type DocumentStatus } from "@/db/schema";
 import { setupTestDb, TEST_DATABASE_URL } from "@/db/test-utils";
 import { getBoss, stopBoss } from "@/lib/queue";
 
-import { runIngestion } from "../../../../../../worker/ingestion";
+import {
+  INGESTION_STAGES,
+  runIngestion,
+} from "../../../../../../worker/ingestion";
 
 import { POST } from "./route";
 
@@ -161,7 +164,7 @@ describe("POST /api/documents/[id]/reprocess", () => {
     // Every stage re-ran: the cache holds fresh stub payloads, no legacy ones.
     const cached = await cachedStages(doc.id);
     expect(cached.map((row) => row.stage).sort()).toEqual(
-      [...LEGACY_STAGES].sort(),
+      [...INGESTION_STAGES].sort(),
     );
     for (const row of cached) {
       expect(row.payload).toEqual({ stub: true });

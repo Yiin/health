@@ -15,14 +15,27 @@
 // cursor — a SAX stream cannot seek, so idempotent writes are the mechanism
 // that prevents duplicates, which the tests verify.
 //
-// Weird input never crashes the worker: zip bytes (the Apple export.zip —
-// archive walking is the Takeout walker's sibling feature, not this parser),
-// non-XML and malformed XML resolve to needs_review; only database errors
-// propagate as transient failures.
+// Apple's real distribution format is export.zip holding
+// apple_health_export/export.xml. Zip bytes take a container path: the
+// archive is spooled to a per-run scratch file (never buffered in RAM — the
+// same move as the Takeout walker), unzipper's central-directory reader
+// locates export.xml, and the decompressed entry streams into the SAME parse
+// as a loose export.xml.
+//
+// Weird input never crashes the worker: an unreadable archive, an archive
+// without export.xml, a corrupt export.xml member, non-XML and malformed XML
+// all resolve to needs_review; only database errors and mid-stream I/O
+// failures propagate as transient failures.
 
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 import type postgres from "postgres";
+import * as unzipper from "unzipper";
 
 import {
   APPLE_HEALTH_SOURCE,
@@ -35,6 +48,10 @@ import {
 
 /** raw_extractions.stage value for the mid-stage progress checkpoint. */
 export const APPLE_HEALTH_PROGRESS_STAGE = "apple_health_progress";
+
+/** The export.xml path inside Apple's export.zip (compared case-insensitively;
+ * mirrors the classifier's zipMarkers in worker/classify.ts). */
+export const EXPORT_XML_ENTRY = "apple_health_export/export.xml";
 
 const INSERT_CHUNK = 500;
 
@@ -54,6 +71,8 @@ export interface IngestAppleHealthOptions {
   signal?: AbortSignal;
   /** Workout insert batch size (per parse flush); tests shrink it. */
   workoutBatchSize?: number;
+  /** Parent directory for the export.zip scratch spool; defaults to os.tmpdir(). */
+  scratchRoot?: string;
 }
 
 export type AppleHealthIngestOutcome =
@@ -66,10 +85,12 @@ export type AppleHealthIngestOutcome =
   | { kind: "needs_review"; reason: string };
 
 /**
- * Parses an Apple Health export.xml stream and persists its rows in batches.
- * needs_review for permanent input problems (zip container, not XML, broken
- * XML); database errors and mid-stream I/O failures propagate (transient —
- * the stage's retry machinery owns them, and re-running is duplicate-free).
+ * Parses an Apple Health export (loose export.xml stream, or the export.zip
+ * container holding apple_health_export/export.xml) and persists its rows in
+ * batches. needs_review for permanent input problems (broken archive, not
+ * XML, broken XML); database errors and mid-stream I/O failures propagate
+ * (transient — the stage's retry machinery owns them, and re-running is
+ * duplicate-free).
  */
 export async function ingestAppleHealthExport(
   sql: postgres.Sql,
@@ -77,32 +98,41 @@ export async function ingestAppleHealthExport(
   options: IngestAppleHealthOptions = {},
 ): Promise<AppleHealthIngestOutcome> {
   const stream = await source.openStream();
-  if (options.signal) {
-    const signal = options.signal;
-    signal.addEventListener(
-      "abort",
-      () => stream.destroy(new Error("worker shutdown: parse aborted")),
-      { once: true },
-    );
-  }
+  bindAbort(stream, options.signal);
 
-  // Zip container sniff: Apple's export.zip holds apple_health_export/
-  // export.xml; walking archives is a separate feature, so flag it clearly.
   const peeked = await peekStream(stream);
-  if (peeked.head.length >= 2 && peeked.head[0] === 0x50 && peeked.head[1] === 0x4b) {
-    return {
-      kind: "needs_review",
-      reason:
-        "zip archive: extract apple_health_export/export.xml first (Apple Health zip walking is not implemented yet)",
-    };
+  const isZip =
+    peeked.head.length >= 2 &&
+    peeked.head[0] === 0x50 &&
+    peeked.head[1] === 0x4b;
+  if (isZip) {
+    return ingestFromExportZip(sql, peeked.stream, options);
   }
+  return parseAndPersist(sql, peeked.stream, options);
+}
 
+/** Destroys the stream when the worker shuts down mid-parse. */
+function bindAbort(stream: Readable, signal: AbortSignal | undefined): void {
+  if (!signal) return;
+  signal.addEventListener(
+    "abort",
+    () => stream.destroy(new Error("worker shutdown: parse aborted")),
+    { once: true },
+  );
+}
+
+/** The shared tail of both paths: parse the XML stream, persist in batches. */
+async function parseAndPersist(
+  sql: postgres.Sql,
+  xmlStream: Readable,
+  options: IngestAppleHealthOptions,
+): Promise<AppleHealthIngestOutcome> {
   const checkpoint = new ProgressCheckpoint(sql, options.documentId);
 
   let stats: AppleHealthParseStats;
   let metrics: AppleHealthMetric[];
   try {
-    const result = await parseAppleHealthXml(peeked.stream, {
+    const result = await parseAppleHealthXml(xmlStream, {
       workoutBatchSize: options.workoutBatchSize,
       onWorkouts: async (batch) => {
         await insertAppleHealthWorkouts(sql, batch);
@@ -131,6 +161,84 @@ export async function ingestAppleHealthExport(
     workouts: stats.workoutsSeen - stats.workoutsSkipped,
     stats,
   };
+}
+
+function isExportXmlEntry(path: string): boolean {
+  const lower = path.toLowerCase();
+  // The canonical container layout, or a bare re-zipped export.xml at the root.
+  return lower === EXPORT_XML_ENTRY || lower === "export.xml";
+}
+
+/**
+ * The export.zip container path: spool the archive to scratch disk (unzipper
+ * needs random access and the archive can be far larger than RAM), locate
+ * export.xml in the central directory, and stream the decompressed entry
+ * into the shared parse.
+ */
+async function ingestFromExportZip(
+  sql: postgres.Sql,
+  zipStream: Readable,
+  options: IngestAppleHealthOptions,
+): Promise<AppleHealthIngestOutcome> {
+  const scratch = await mkdtemp(
+    join(options.scratchRoot ?? tmpdir(), "health-apple-zip-"),
+  );
+  try {
+    const archivePath = join(scratch, "export.zip");
+    await pipeline(zipStream, createWriteStream(archivePath));
+
+    let entry: unzipper.File | undefined;
+    try {
+      const directory = await unzipper.Open.file(archivePath);
+      entry = directory.files.find(
+        (file) => file.type !== "Directory" && isExportXmlEntry(file.path),
+      );
+    } catch (error) {
+      return {
+        kind: "needs_review",
+        reason: `unreadable zip archive: ${message(error)}`,
+      };
+    }
+    if (!entry) {
+      return {
+        kind: "needs_review",
+        reason: `zip archive has no ${EXPORT_XML_ENTRY} entry (not an Apple Health export.zip)`,
+      };
+    }
+
+    // The entry decompresses from the local scratch file, so a stream error
+    // during the parse is a corrupt zip member — a permanent input problem,
+    // unlike source-stream (S3) errors on the loose path. Captured via the
+    // error event; read through an accessor because TS narrows the captured
+    // variable to null at direct read sites.
+    let entryError: Error | null = null;
+    const getEntryError = (): Error | null => entryError;
+    const xmlStream = entry.stream();
+    xmlStream.on("error", (error: Error) => {
+      entryError = error;
+    });
+    bindAbort(xmlStream, options.signal);
+    try {
+      return await parseAndPersist(sql, xmlStream, options);
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      const corrupt = getEntryError();
+      if (corrupt) {
+        return {
+          kind: "needs_review",
+          reason: `corrupt zip entry ${entry.path}: ${message(corrupt)}`,
+        };
+      }
+      throw error;
+    }
+  } finally {
+    // Scratch cleanup is guaranteed even when the spool or parse throws.
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Upserts the raw_extractions checkpoint row (no-op without a documentId). */
