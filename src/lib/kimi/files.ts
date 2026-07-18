@@ -60,15 +60,37 @@ export async function uploadImage(
   return { kind: "image-ref", fileId };
 }
 
+/**
+ * Moonshot rejects files whose text layer yields nothing (scanned/image-only
+ * PDFs) with 400 "text extract error: 没有解析出内容" — for purpose=file-extract
+ * that can happen at UPLOAD time (POST /files) as well as at content fetch.
+ */
+export function isNoTextLayerError(error: unknown): boolean {
+  return (
+    error instanceof KimiError &&
+    error.kind === "api" &&
+    error.status === 400 &&
+    /text extract error/i.test(error.message)
+  );
+}
+
 /** Fetch the text Kimi extracted from a file-extract upload. */
 export async function getExtractedText(
   fileId: string,
 ): Promise<KimiExtractResult> {
   return kimiQueue(() =>
     withBackoff(async () => {
-      const response = await kimiFetch(
-        `/files/${encodeURIComponent(fileId)}/content`,
-      );
+      let response: Response;
+      try {
+        response = await kimiFetch(
+          `/files/${encodeURIComponent(fileId)}/content`,
+        );
+      } catch (error) {
+        // No text layer (scanned PDF): treat exactly like an empty extraction
+        // so callers take their fallback path (raw head sample / vision).
+        if (isNoTextLayerError(error)) return { kind: "empty" };
+        throw error;
+      }
       const raw = await response.text();
       // file-extract content comes back as JSON with a `content` field, but be
       // lenient: a plain-text body is used as-is.

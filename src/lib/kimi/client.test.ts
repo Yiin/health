@@ -267,6 +267,20 @@ describe("chatStructured", () => {
     expect(body.model).toBe("kimi-k3");
   });
 
+  it("reports token usage to onUsage", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(chatCompletion('{"a":1}')));
+
+    const seen: unknown[] = [];
+    await chatStructured({
+      ...minimalParams,
+      onUsage: (usage) => seen.push(usage),
+    });
+
+    expect(seen).toEqual([
+      { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    ]);
+  });
+
   it("maps 401 to an auth error without retrying", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ error: { message: "Invalid Authentication" } }, 401),
