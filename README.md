@@ -168,15 +168,69 @@ Services:
 
 `docker compose down -v` tears everything down including volumes.
 
-## Coolify deployment
+## Deployment & ops
 
-- Build pack: `dockercompose` — the compose file builds a single image used by both
-  `web` (default CMD) and `worker` (command override).
-- Set env vars from `.env.example` in Coolify (POSTGRES_PASSWORD, MINIO_ROOT_USER,
-  MINIO_ROOT_PASSWORD, MOONSHOT_API_KEY, KIMI_MODEL_CHAT, …). On the VPS also set
-  `WEB_PORT=3100` — host port 3000 is already taken by the meals app.
-- Exposure is tailnet-only via host Caddy — `web` publishes on loopback
-  (`127.0.0.1:${WEB_PORT:-3000}`), which Caddy proxies. `db` and `minio`
-  publish loopback-only (`127.0.0.1:${DB_PORT:-5433}` and
-  `127.0.0.1:${MINIO_PORT:-9000}`) for host-side tooling/tests — Caddy never
-  proxies them.
+Deploys run on the yiin.lt VPS via Coolify (dockercompose build pack; app
+`health`, uuid `sm0pz5crgs0hni4qzxwqxuw0`, project `zscg4kw848www4k44g4okgg4`,
+server `tw8so8o8sc0w8ssw80kco8c8`). The compose file builds a single image
+used by both `web` (default CMD) and `worker` (command override); a push to
+`main` triggers a deploy through the webhook workflow in
+`.github/workflows/deploy.yml`.
+
+### Required Coolify env vars
+
+Set everything from `.env.example` (`POSTGRES_PASSWORD`, `MINIO_ROOT_USER`,
+`MINIO_ROOT_PASSWORD`, `MOONSHOT_API_KEY`, `KIMI_MODEL_CHAT`, …), plus these
+two VPS-specific port overrides. Both are **required** — a rebuilt Coolify
+app without them silently regresses:
+
+- `WEB_PORT=3100` — host port 3000 belongs to the meals app (meals.yiin.lt).
+- `MINIO_PORT=9080` — host port 9000 belongs to an unrelated ClickHouse
+  container. Shipping the 9000 default makes `docker compose up` die on the
+  port collision, which takes `web`/`worker` down (incident 2026-07-18:
+  every deploy from 13:05 to 15:36 UTC failed this way).
+
+### Port layout (all loopback-only on the host)
+
+- `127.0.0.1:3100` → `web` — the only service Caddy proxies
+- `127.0.0.1:9080` → `minio` — host-side tooling/tests only
+- `127.0.0.1:5433` → `db` — host-side tooling only
+
+### Exposure: tailnet-only
+
+The VPS runs a custom Caddy with the caddy-tailscale plugin:
+
+```
+health.yiin.lt {
+  bind tailscale/health
+  tls { dns digitalocean {env.DIGITALOCEAN_API_TOKEN} }
+  reverse_proxy localhost:3100
+}
+```
+
+The site binds **only** the tailnet node `health` (100.66.69.34). The public
+Caddy fallback explicitly excludes `health.yiin.lt`, so over the public
+internet the domain answers an **empty 200 on purpose** — that is the design,
+not a bug; never point public Caddy at the app. Name resolution for tailnet
+clients is split-DNS managed by the user outside this repo: never create
+public DNS records for `health.yiin.lt` and never change the Caddyfile from
+app work.
+
+### Post-deploy verification
+
+A plain HTTP 200 proves nothing here: with the app down, Caddy still answers
+an (empty) 200. After every deploy — or whenever the site looks off — run
+from the VPS (or any tailnet client):
+
+```bash
+scripts/verify-deploy.sh        # or: npm run verify:deploy
+```
+
+It curls `https://health.yiin.lt/` pinned to the tailnet IP
+(`curl --resolve health.yiin.lt:443:100.66.69.34`) and fails unless the
+response is a 200 with a **non-empty** body containing `<html` — exactly the
+empty-200 failure mode a status-only check misses. If the basic-auth gate is
+enabled on the deployment, export `BASIC_AUTH_USER`/`BASIC_AUTH_PASS` first.
+On failure, check the app directly on the VPS
+(`curl -sS http://127.0.0.1:3100/api/health`, expect `{"ok":true}`), then
+`docker ps` and the Coolify deployment logs.
