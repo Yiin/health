@@ -61,6 +61,13 @@ ENV HOSTNAME=0.0.0.0
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 
+# poppler-utils (pdfinfo + pdftoppm, ~5 MB) rasterizes scanned PDFs for the
+# worker's vision extraction path (worker/vision.ts). Chosen over rendering
+# through pdfjs + @napi-rs/canvas: an order of magnitude slimmer than the
+# skia native module, no npm dependency, and the reference renderer copes
+# with PDFs pdfjs chokes on — exactly the population that lands in vision.
+RUN apk add --no-cache poppler-utils
+
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static

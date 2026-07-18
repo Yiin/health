@@ -1,15 +1,31 @@
-// Regenerates the synthetic lab-report PDF fixtures in this directory:
-//   en-cbc.pdf   EN multi-analyte CBC + basic metabolic panel (text layer)
-//   lt-lab.pdf   Lithuanian lab report (decimal commas, LT diacritics)
-//   scanned.pdf  image-only page with NO text layer (scanned-PDF stand-in)
+// Regenerates the synthetic lab-report fixtures in this directory:
+//   en-cbc.pdf      EN multi-analyte CBC + basic metabolic panel (text layer)
+//   lt-lab.pdf      Lithuanian lab report (decimal commas, LT diacritics)
+//   scanned.pdf     graphics-only page with NO text layer (no real content)
+//   scanned-lab.pdf image-only PDF of the EN report — a real scanned lab
+//                   report stand-in: the page is a JPEG, there is no text
+//                   layer at all (for the vision extraction path)
+//   lab-photo.jpg   JPEG render of the LT report — a "photo of a lab report"
+//                   stand-in for document_type image ingestion
 //
-// Hand-rolled writer (no dependencies): each character gets a CID, text is
-// emitted as hex CID strings under a Type0/Identity-H font, and a ToUnicode
+// Hand-rolled writer (no npm dependencies): each character gets a CID, text
+// is emitted as hex CID strings under a Type0/Identity-H font, and a ToUnicode
 // CMap maps CIDs back to Unicode — which is all a text extractor (unpdf /
-// pdfjs) needs. Run: `node fixtures/health-docs/generate.mjs`.
+// pdfjs) needs. The image-only fixtures render the text PDFs with poppler's
+// pdftoppm, so regenerating requires poppler-utils installed locally:
+//   node fixtures/health-docs/generate.mjs
 
-import { writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { EN_CBC, fixtureLines, LT_LAB } from "./content.mjs";
 
@@ -95,14 +111,105 @@ export function buildScannedPdf() {
   ]);
 }
 
+/**
+ * Width/height of a JPEG from its SOF marker (pdftoppm emits SOF0). Throws on
+ * malformed input — fixture bytes are generated, never adversarial.
+ */
+export function jpegSize(bytes) {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    throw new Error("not a JPEG (missing SOI)");
+  }
+  let offset = 2;
+  while (offset < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue; // tolerate stray bytes between segments
+    }
+    const marker = bytes[offset + 1];
+    // Standalone markers (no length): SOI, EOI, RSTn, TEM.
+    if (marker === 0xd8 || marker === 0xd9 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      offset += 2;
+      continue;
+    }
+    const length = bytes.readUInt16BE(offset + 2);
+    // SOF0/SOF2 carry the frame dimensions.
+    if (marker === 0xc0 || marker === 0xc2) {
+      return {
+        height: bytes.readUInt16BE(offset + 5),
+        width: bytes.readUInt16BE(offset + 7),
+      };
+    }
+    offset += 2 + length;
+  }
+  throw new Error("no SOF marker found");
+}
+
+/**
+ * Builds an image-only PDF: one A4 page per JPEG, each drawn as a full-page
+ * DCTDecode XObject. No text layer anywhere — the scanned-document stand-in
+ * for the vision extraction path.
+ */
+export function buildImagePdf(jpegs) {
+  const pageObjectIds = jpegs.map((_, i) => 3 + i * 3);
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${jpegs.length} >>`,
+  ];
+  jpegs.forEach((jpeg, i) => {
+    const { width, height } = jpegSize(jpeg);
+    const pageId = 3 + i * 3;
+    const imageId = pageId + 1;
+    const contentId = pageId + 2;
+    const content = `q\n595 0 0 842 0 0 cm\n/Im${i} Do\nQ`;
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] ` +
+        `/Resources << /XObject << /Im${i} ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>`,
+      Buffer.concat([
+        Buffer.from(
+          `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} ` +
+            `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
+          "latin1",
+        ),
+        jpeg,
+        Buffer.from("\nendstream", "latin1"),
+      ]),
+      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    );
+  });
+  return assemblePdf(objects);
+}
+
+/**
+ * Renders every page of a PDF to a JPEG with poppler's pdftoppm (the same
+ * rasterizer the worker's vision path uses), sorted page by page.
+ */
+export function renderPdfToJpegs(pdfPath, dpi = 150) {
+  const dir = mkdtempSync(join(tmpdir(), "fixture-render-"));
+  try {
+    execFileSync("pdftoppm", ["-jpeg", "-r", String(dpi), pdfPath, join(dir, "page")]);
+    return readdirSync(dir)
+      .filter((name) => name.endsWith(".jpg"))
+      .sort()
+      .map((name) => readFileSync(join(dir, name)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** Serializes objects (1-indexed) with a correct xref table. */
 function assemblePdf(objects) {
-  const chunks = ["%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"];
+  const chunks = [Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "latin1")];
   const offsets = [];
   let position = chunks[0].length;
   objects.forEach((body, i) => {
     offsets.push(position);
-    const chunk = `${i + 1} 0 obj\n${body}\nendobj\n`;
+    const chunk = Buffer.isBuffer(body)
+      ? Buffer.concat([
+          Buffer.from(`${i + 1} 0 obj\n`, "latin1"),
+          body,
+          Buffer.from("\nendobj\n", "latin1"),
+        ])
+      : Buffer.from(`${i + 1} 0 obj\n${body}\nendobj\n`, "latin1");
     chunks.push(chunk);
     position += chunk.length;
   });
@@ -117,18 +224,33 @@ function assemblePdf(objects) {
   const trailer =
     `${xref}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n` +
     `startxref\n${xrefStart}\n%%EOF\n`;
-  return Buffer.concat([
-    Buffer.from(chunks.join(""), "latin1"),
-    Buffer.from(trailer, "latin1"),
-  ]);
+  return Buffer.concat([...chunks, Buffer.from(trailer, "latin1")]);
 }
 
-const fixtures = [
-  [EN_CBC.filename, buildTextPdf(fixtureLines(EN_CBC))],
-  [LT_LAB.filename, buildTextPdf(fixtureLines(LT_LAB))],
-  ["scanned.pdf", buildScannedPdf()],
-];
-for (const [filename, bytes] of fixtures) {
-  writeFileSync(`${OUT_DIR}${filename}`, bytes);
-  console.log(`wrote ${filename} (${bytes.length} bytes)`);
+const enCbcPdf = buildTextPdf(fixtureLines(EN_CBC));
+const ltLabPdf = buildTextPdf(fixtureLines(LT_LAB));
+
+function main() {
+  writeFileSync(`${OUT_DIR}${EN_CBC.filename}`, enCbcPdf);
+  console.log(`wrote ${EN_CBC.filename} (${enCbcPdf.length} bytes)`);
+  writeFileSync(`${OUT_DIR}${LT_LAB.filename}`, ltLabPdf);
+  console.log(`wrote ${LT_LAB.filename} (${ltLabPdf.length} bytes)`);
+  const scannedPdf = buildScannedPdf();
+  writeFileSync(`${OUT_DIR}scanned.pdf`, scannedPdf);
+  console.log(`wrote scanned.pdf (${scannedPdf.length} bytes)`);
+
+  // Image-only fixtures: render the text PDFs with poppler, then re-embed the
+  // JPEGs without any text layer. Requires pdftoppm on PATH (poppler-utils).
+  const enPhoto = renderPdfToJpegs(`${OUT_DIR}${EN_CBC.filename}`)[0];
+  const scannedLabPdf = buildImagePdf([enPhoto]);
+  writeFileSync(`${OUT_DIR}scanned-lab.pdf`, scannedLabPdf);
+  console.log(`wrote scanned-lab.pdf (${scannedLabPdf.length} bytes)`);
+  const ltPhoto = renderPdfToJpegs(`${OUT_DIR}${LT_LAB.filename}`)[0];
+  writeFileSync(`${OUT_DIR}lab-photo.jpg`, ltPhoto);
+  console.log(`wrote lab-photo.jpg (${ltPhoto.length} bytes)`);
+}
+
+// Importable for its builders (tests) without regenerating the fixtures.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }

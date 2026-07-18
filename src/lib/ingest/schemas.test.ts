@@ -7,9 +7,12 @@ import {
   POST_INGESTION_INSIGHT_JSON_SCHEMA,
   labExtractionSchema,
   measuredOnOf,
+  MEDICAL_DOC_EXTRACTION_JSON_SCHEMA,
+  medicalDocExtractionSchema,
   parseBiomarkerMapping,
   parseDocumentSummary,
   parseLabExtraction,
+  parseMedicalDocExtraction,
   parsePostIngestionInsight,
 } from "./schemas";
 
@@ -137,6 +140,68 @@ describe("parseBiomarkerMapping", () => {
   });
 });
 
+const VALID_MEDICAL = {
+  provider: "Vilnius University Hospital",
+  documentDate: "2026-05-01",
+  summary: "Discharge letter following a routine appendectomy.",
+  keyFindings: ["Uncomplicated recovery", "Follow-up in 2 weeks"],
+};
+
+describe("parseMedicalDocExtraction", () => {
+  it("accepts a valid reply and a null documentDate", () => {
+    const parsed = parseMedicalDocExtraction(JSON.stringify(VALID_MEDICAL));
+    expect(parsed.ok).toBe(true);
+
+    const noDate = parseMedicalDocExtraction(
+      JSON.stringify({ ...VALID_MEDICAL, documentDate: null }),
+    );
+    expect(noDate.ok).toBe(true);
+
+    const missingDate = parseMedicalDocExtraction(
+      JSON.stringify({ ...VALID_MEDICAL, documentDate: undefined }),
+    );
+    expect(missingDate.ok).toBe(true);
+  });
+
+  it("accepts empty provider and empty keyFindings", () => {
+    const parsed = medicalDocExtractionSchema.safeParse({
+      ...VALID_MEDICAL,
+      provider: "",
+      keyFindings: [],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects non-JSON input", () => {
+    const parsed = parseMedicalDocExtraction("{not json");
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toMatch(/^not JSON:/);
+  });
+
+  it("rejects a malformed documentDate with a path-tagged issue", () => {
+    const parsed = parseMedicalDocExtraction(
+      JSON.stringify({ ...VALID_MEDICAL, documentDate: "01.05.2026" }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error).toMatch(/^schema mismatch:/);
+      expect(parsed.error).toContain("documentDate");
+    }
+  });
+
+  it("rejects an empty summary and empty-string findings", () => {
+    expect(
+      parseMedicalDocExtraction(JSON.stringify({ ...VALID_MEDICAL, summary: "" }))
+        .ok,
+    ).toBe(false);
+    expect(
+      parseMedicalDocExtraction(
+        JSON.stringify({ ...VALID_MEDICAL, keyFindings: [""] }),
+      ).ok,
+    ).toBe(false);
+  });
+});
+
 describe("parseDocumentSummary", () => {
   it("accepts a valid summary", () => {
     const parsed = parseDocumentSummary(
@@ -209,6 +274,17 @@ describe("JSON Schemas (strict structured-output convention)", () => {
     const { properties, required } =
       BIOMARKER_MAPPING_JSON_SCHEMA.schema.properties.mappings.items;
     expect([...required].sort()).toEqual(Object.keys(properties).sort());
+  });
+
+  it("lists every medical-doc property in required", () => {
+    const { properties, required } = MEDICAL_DOC_EXTRACTION_JSON_SCHEMA.schema;
+    expect([...required].sort()).toEqual(Object.keys(properties).sort());
+    // documentDate is the only nullable field.
+    const documentDate: unknown = properties.documentDate;
+    expect(documentDate).toHaveProperty("anyOf");
+    expect(
+      JSON.stringify((documentDate as { anyOf: unknown[] }).anyOf),
+    ).toContain('"null"');
   });
 
   it.each([
