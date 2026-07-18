@@ -6,7 +6,10 @@
 // being attempted, which is what makes a mid-stage crash safe to resume.
 //
 // A stage may also HALT the pipeline in a terminal status (needs_review /
-// ignored) by returning a payload with a `halt` field — see StageHalt.
+// ignored) by returning a payload with a `halt` field — see StageHalt — or
+// PARK it in the stage's non-terminal status by throwing StagePendingError
+// (the Takeout parent barrier; the job resolves without a retry and a child
+// document's terminal transition re-drives the parent).
 //
 // The classifying stage is real (worker/classify.ts); extracting and
 // normalizing remain stubs until their issues land.
@@ -61,6 +64,22 @@ export interface StageHalt {
 
 const HALT_STATUSES: ReadonlySet<string> = new Set(["needs_review", "ignored"]);
 
+/**
+ * Thrown by a stage to PARK the document at its current stage without failing
+ * it: nothing is cached, no stage_error is recorded, and the job resolves (so
+ * pg-boss schedules no retry). The document stays in the stage's non-terminal
+ * status until an external event re-drives it. Used by the Takeout barrier
+ * (worker/takeout.ts), which parks a parent archive at `normalizing` until
+ * its child documents all reach terminal statuses — see
+ * completeParentIfChildrenTerminal.
+ */
+export class StagePendingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StagePendingError";
+  }
+}
+
 /** Reads a validated StageHalt off a stage payload's `halt` field, if any. */
 export function stageHaltOf(payload: postgres.JSONValue): StageHalt | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -91,19 +110,91 @@ interface DocumentRow {
   status: string;
   sha256: string;
   original_filename: string;
+  parent_document_id: string | null;
 }
 
 export type IngestionOutcome =
   | { kind: "done" }
   | { kind: "failed"; stage: IngestionStage; message: string }
   | { kind: "halted"; stage: IngestionStage; status: string }
+  | { kind: "pending"; stage: IngestionStage; message: string }
   | { kind: "skipped"; status: string }
   | { kind: "missing" };
 
 // Statuses a job must not advance: finished runs, and failed/needs_review
 // documents waiting on the retry endpoint (which resets them to `uploaded`
 // before re-enqueueing).
-const TERMINAL_STATUSES = new Set(["done", "failed", "needs_review", "ignored"]);
+const TERMINAL_STATUSES = new Set([
+  "done",
+  "failed",
+  "needs_review",
+  "ignored",
+]);
+
+/**
+ * Completes a parent document parked at the normalizing barrier once every
+ * child is terminal (done / failed / needs_review / ignored — a failed child
+ * does NOT fail its parent). The guarded UPDATE is one atomic statement, so
+ * children finishing concurrently cannot double-complete the parent, and it
+ * no-ops unless the parent is parked at 'normalizing' — a status the executor
+ * only sets after the previous stage's payload was cached, so reaching it
+ * implies fan-out finished. On completion a provenance payload is cached for
+ * the barrier stage, mirroring what the barrier itself writes when it sees
+ * all children terminal. Returns whether the parent was completed.
+ */
+export async function completeParentIfChildrenTerminal(
+  sql: postgres.Sql,
+  parentId: string,
+  trigger: { childDocumentId: string },
+): Promise<boolean> {
+  // postgres.js types begin() as Promise<UnwrapPromiseArray<T>>, which does
+  // not reduce back to T for a plain boolean — the runtime value is boolean.
+  return sql.begin(async (tx) => {
+    const completed = await tx<{ id: string }[]>`
+      update documents p
+      set status = 'done', stage_error = null
+      where p.id = ${parentId}
+        and p.status = 'normalizing'
+        and not exists (
+          select 1 from documents c
+          where c.parent_document_id = p.id
+            and c.status not in ${tx([...TERMINAL_STATUSES])}
+        )
+      returning p.id
+    `;
+    if (completed.length === 0) return false;
+    await tx`
+      insert into raw_extractions (document_id, stage, payload)
+      values (
+        ${parentId},
+        'normalizing',
+        ${tx.json({
+          barrier: "children_terminal",
+          childDocumentId: trigger.childDocumentId,
+        })}
+      )
+      on conflict (document_id, stage) do nothing
+    `;
+    return true;
+  }) as Promise<boolean>;
+}
+
+/**
+ * Re-drives the barrier of the document's parent (if any) after the document
+ * itself reached a terminal status. Runs on every terminal transition — done,
+ * final-attempt failure, halt — and on jobs that find the document already
+ * terminal, which covers a crash between the transition and the notification.
+ */
+async function notifyParentOnTerminal(
+  sql: postgres.Sql,
+  document: DocumentRow,
+): Promise<void> {
+  if (document.parent_document_id !== null) {
+    await completeParentIfChildrenTerminal(sql, document.parent_document_id, {
+      childDocumentId: document.id,
+    });
+  }
+}
 
 export interface RunIngestionOptions {
   stages?: Record<IngestionStage, StageRunner>;
@@ -131,13 +222,14 @@ export async function runIngestion(
   const now = options.now ?? (() => new Date());
 
   const rows = await sql<DocumentRow[]>`
-    select id, status, sha256, original_filename
+    select id, status, sha256, original_filename, parent_document_id
     from documents
     where id = ${documentId}
   `;
   const document = rows[0];
   if (!document) return { kind: "missing" };
   if (TERMINAL_STATUSES.has(document.status)) {
+    await notifyParentOnTerminal(sql, document);
     return { kind: "skipped", status: document.status };
   }
 
@@ -179,9 +271,17 @@ export async function runIngestion(
           update documents set status = ${halt.status}, stage_error = null
           where id = ${documentId}
         `;
+        await notifyParentOnTerminal(sql, document);
         return { kind: "halted", stage, status: halt.status };
       }
     } catch (error) {
+      // A stage may PARK the run instead of failing (the Takeout barrier
+      // waiting on child documents): nothing is cached, no stage_error is
+      // recorded, and the job resolves — an external event re-drives the
+      // document past the barrier.
+      if (error instanceof StagePendingError) {
+        return { kind: "pending", stage, message: error.message };
+      }
       const message = error instanceof Error ? error.message : String(error);
       const finalAttempt = attempt >= MAX_ATTEMPTS;
       await sql`
@@ -190,7 +290,10 @@ export async function runIngestion(
             stage_error = ${sql.json({ stage, message, at: now().toISOString() })}
         where id = ${documentId}
       `;
-      if (finalAttempt) return { kind: "failed", stage, message };
+      if (finalAttempt) {
+        await notifyParentOnTerminal(sql, document);
+        return { kind: "failed", stage, message };
+      }
       throw error;
     }
   }
@@ -199,5 +302,6 @@ export async function runIngestion(
     update documents set status = 'done', stage_error = null
     where id = ${documentId}
   `;
+  await notifyParentOnTerminal(sql, document);
   return { kind: "done" };
 }

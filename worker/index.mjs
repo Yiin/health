@@ -19,6 +19,10 @@ import {
   stubStages,
 } from "./ingestion.ts";
 import { createClassifyStage } from "./classify.ts";
+import {
+  createTakeoutBarrierStage,
+  createTakeoutExtractStage,
+} from "./takeout.ts";
 
 // Same queue the web enqueue side uses (src/lib/queue.ts); duplicated here
 // because node type stripping cannot resolve that module's import graph.
@@ -27,12 +31,42 @@ export const INGEST_QUEUE = "ingest";
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
 
 /**
+ * Stage dispatch by document_type: stages that only apply to one type look
+ * the document up and fall through to the stub for every other type. (The
+ * lab-report extraction stage joins this dispatch when health-etv.16 lands.)
+ */
+function dispatchByType(sql, handlers, fallback) {
+  return async (ctx) => {
+    const rows = await sql`
+      select document_type from documents where id = ${ctx.documentId}
+    `;
+    const handler = rows[0] ? handlers[rows[0].document_type] : undefined;
+    return (handler ?? fallback)(ctx);
+  };
+}
+
+/**
  * Production stage runners: the real classifying stage (deterministic
- * sniffing + Kimi fallback, worker/classify.ts) plus the remaining stubs.
- * Built per-worker because the classify stage closes over the sql pool.
+ * sniffing + Kimi fallback, worker/classify.ts), the Takeout fan-out +
+ * parent barrier for takeout_archive documents (worker/takeout.ts), plus
+ * the remaining stubs. Built per-worker because stages close over the sql
+ * pool.
  */
 export function defaultStages(sql) {
-  return { ...stubStages, classifying: createClassifyStage({ sql }) };
+  return {
+    ...stubStages,
+    classifying: createClassifyStage({ sql }),
+    extracting: dispatchByType(
+      sql,
+      { takeout_archive: createTakeoutExtractStage({ sql }) },
+      stubStages.extracting,
+    ),
+    normalizing: dispatchByType(
+      sql,
+      { takeout_archive: createTakeoutBarrierStage({ sql }) },
+      stubStages.normalizing,
+    ),
+  };
 }
 
 /**
@@ -98,6 +132,11 @@ export async function startWorker(options = {}) {
           case "halted":
             log.log(
               `[worker] ${documentId} halted at stage "${outcome.stage}" → status "${outcome.status}"`,
+            );
+            break;
+          case "pending":
+            log.log(
+              `[worker] ${documentId} parked at stage "${outcome.stage}": ${outcome.message}`,
             );
             break;
           case "skipped":
