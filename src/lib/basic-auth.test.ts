@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  authenticationRequiredResponse,
   isAuthorized,
   isBasicAuthEnabled,
+  isRequestAuthorized,
   parseBasicAuthHeader,
 } from "./basic-auth";
 
@@ -63,5 +65,37 @@ describe("isAuthorized", () => {
 
   it("accepts matching credentials", () => {
     expect(isAuthorized(config, basicAuth("yiin", "hunter2"))).toBe(true);
+  });
+});
+
+describe("isRequestAuthorized", () => {
+  it("reads the gate config from the environment", () => {
+    delete process.env.BASIC_AUTH_USER;
+    delete process.env.BASIC_AUTH_PASS;
+    expect(isRequestAuthorized(new Request("http://localhost/"))).toBe(true);
+
+    process.env.BASIC_AUTH_USER = "yiin";
+    process.env.BASIC_AUTH_PASS = "hunter2";
+    try {
+      expect(isRequestAuthorized(new Request("http://localhost/"))).toBe(false);
+      const request = new Request("http://localhost/", {
+        headers: { authorization: basicAuth("yiin", "hunter2") },
+      });
+      expect(isRequestAuthorized(request)).toBe(true);
+    } finally {
+      delete process.env.BASIC_AUTH_USER;
+      delete process.env.BASIC_AUTH_PASS;
+    }
+  });
+});
+
+describe("authenticationRequiredResponse", () => {
+  it("is a 401 with the basic-auth challenge", async () => {
+    const response = authenticationRequiredResponse();
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      'Basic realm="health"',
+    );
+    expect(await response.text()).toBe("Authentication required");
   });
 });

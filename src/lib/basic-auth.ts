@@ -47,3 +47,22 @@ export function isAuthorized(
     safeEqual(creds.pass, config.pass as string)
   );
 }
+
+/**
+ * Env-configured check shared by the proxy (src/proxy.ts) and API routes that
+ * must bypass the proxy (streaming uploads — see the proxy's matcher).
+ */
+export function isRequestAuthorized(request: Request): boolean {
+  return isAuthorized(
+    { user: process.env.BASIC_AUTH_USER, pass: process.env.BASIC_AUTH_PASS },
+    request.headers.get("authorization"),
+  );
+}
+
+/** The 401 shape the proxy and self-gating routes both answer with. */
+export function authenticationRequiredResponse(): Response {
+  return new Response("Authentication required", {
+    status: 401,
+    headers: { "WWW-Authenticate": 'Basic realm="health"' },
+  });
+}

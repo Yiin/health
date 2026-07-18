@@ -1,10 +1,9 @@
 // Repository for the documents table (ingestion state machine + FTS).
 //
 // Every function takes the db handle as its first argument instead of
-// importing the singleton from src/db/index.ts: the singleton throws at
-// import time when DATABASE_URL is unset, and tests inject their own handle
+// importing the singleton from src/db/index.ts: tests inject their own handle
 // from src/db/test-utils.ts. The singleton's type is identical, so route
-// handlers can pass `db` directly.
+// handlers pass getDb() (or an in-transaction handle) directly.
 
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -68,6 +67,27 @@ export async function registerUpload(
     );
   }
   return { document: existing[0], isDuplicate: true };
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Fetches one document by id. A malformed (non-uuid) id yields undefined
+ * rather than Postgres's "invalid input syntax for type uuid" error — the id
+ * typically arrives as an arbitrary URL path param.
+ */
+export async function getDocument(
+  db: Db,
+  documentId: string,
+): Promise<Document | undefined> {
+  if (!UUID_PATTERN.test(documentId)) return undefined;
+  const rows = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .limit(1);
+  return rows[0];
 }
 
 /**
