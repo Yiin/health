@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type postgres from "postgres";
 
@@ -169,6 +170,15 @@ export type RetryOutcome =
  * preserving attempts) and re-enqueues its ingest job — atomically, same as
  * the upload path. Any other status is not retryable.
  *
+ * The cached raw_extractions rows for `extracting` and `normalizing` are
+ * DELETED so the re-run actually re-executes those stages instead of resuming
+ * from the payloads that produced the failure (e.g. a scanned lab report that
+ * halted before the vision path existed must re-extract on retry). The
+ * classifying cache is kept — re-classification is wasted work when the type
+ * is already known — EXCEPT when `opts.documentType` carries a "Process as…"
+ * hint: then classifying is dropped too, so the hint is actually honored
+ * (otherwise the cached classify output would be reused verbatim).
+ *
  * `opts.documentType` is the "Process as…" hint: it is stored as a metadata
  * override (the effective type wins over the pipeline-extracted column), so
  * the classifier sees it on the re-run and the hint survives future re-runs.
@@ -188,6 +198,19 @@ export async function resetDocumentForRetry(
         documentType: opts.documentType,
       });
     }
+    await txDb
+      .delete(schema.rawExtractions)
+      .where(
+        and(
+          eq(schema.rawExtractions.documentId, documentId),
+          inArray(
+            schema.rawExtractions.stage,
+            opts.documentType
+              ? ["classifying", "extracting", "normalizing"]
+              : ["extracting", "normalizing"],
+          ),
+        ),
+      );
     const reset = await updateStatus(txDb, documentId, "uploaded", null);
     if (!reset) return { kind: "not_found" };
     const jobId = await enqueueIngest(reset, { db: bossTx });

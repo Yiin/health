@@ -1,12 +1,14 @@
 // Zod schemas + chatStructured JSON Schemas for the lab-report ingestion
 // stages (worker/extract.ts, worker/normalize.ts).
 //
-// Two schema families live here:
+// Three schema families live here:
 //   1. LAB_EXTRACTION — the model's per-document output: collection date, lab
 //      name, and every measured analyte as reported (name/value/unit +
 //      optional reference range and flag).
 //   2. BIOMARKER_MAPPING — the normalization fallback that maps as-reported
 //      analyte names onto biomarkers catalog slugs.
+//   3. MEDICAL_DOC_EXTRACTION — the vision path's output for non-lab medical
+//      documents: provider, document date, English summary, key findings.
 //
 // The zod schema is the validator (callers own retry/escalation, mirroring
 // the classifier in worker/classify.ts). The JSON Schema is hand-written next
@@ -133,6 +135,68 @@ export const LAB_EXTRACTION_JSON_SCHEMA = {
   },
 } as const;
 
+/**
+ * MEDICAL_DOC_EXTRACTION — the vision path's per-document output for non-lab
+ * medical documents (discharge letters, referrals, imaging reports,
+ * prescriptions, doctor's notes): provider, document date, an English
+ * summary, and the key findings. Used by worker/extract.ts for medical_doc
+ * images and scanned medical PDFs; there is no text-layer variant yet.
+ */
+export const medicalDocExtractionSchema = z.object({
+  /** Clinic/hospital/doctor name as printed; empty string when absent. */
+  provider: z.string(),
+  /** The document's own date (YYYY-MM-DD or datetime), null when absent. */
+  documentDate: z
+    .string()
+    .regex(
+      ISO_DATE_OR_DATETIME,
+      "expected an ISO 8601 date (YYYY-MM-DD) or datetime",
+    )
+    .nullish(),
+  /** 2-3 sentence English summary for the documents library. */
+  summary: z.string().min(1),
+  /** Clinically important points, one per entry, in English. */
+  keyFindings: z.array(z.string().min(1)),
+});
+export type MedicalDocExtraction = z.infer<typeof medicalDocExtractionSchema>;
+
+export const MEDICAL_DOC_EXTRACTION_JSON_SCHEMA = {
+  name: "medical_doc_extraction",
+  description:
+    "Metadata + summary of one non-lab medical document (English or Lithuanian), read from page images.",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      provider: {
+        type: "string",
+        description:
+          "Clinic/hospital/doctor name as printed; empty string when absent.",
+      },
+      documentDate: {
+        anyOf: [{ type: "string" }, { type: "null" }],
+        description:
+          "The document's own date as ISO 8601 (YYYY-MM-DD); null when not identifiable.",
+      },
+      summary: {
+        type: "string",
+        description:
+          "2-3 sentence English summary of the document for the library.",
+      },
+      keyFindings: {
+        type: "array",
+        items: {
+          type: "string",
+          description:
+            "One clinically important point (diagnosis, recommendation, medication), in English.",
+        },
+      },
+    },
+    required: ["provider", "documentDate", "summary", "keyFindings"],
+    additionalProperties: false,
+  },
+} as const;
+
 export const biomarkerMappingSchema = z.object({
   mappings: z.array(
     z.object({
@@ -216,4 +280,11 @@ export function parseBiomarkerMapping(
   raw: string,
 ): ParseResult<BiomarkerMapping> {
   return parseWith(raw, biomarkerMappingSchema);
+}
+
+/** Validates the raw chatStructured JSON string for MEDICAL_DOC_EXTRACTION. */
+export function parseMedicalDocExtraction(
+  raw: string,
+): ParseResult<MedicalDocExtraction> {
+  return parseWith(raw, medicalDocExtractionSchema);
 }
