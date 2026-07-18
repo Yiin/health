@@ -26,6 +26,8 @@
 
 import type postgres from "postgres";
 
+import { KimiError } from "../src/lib/kimi/client.ts";
+
 export const INGESTION_STAGES = [
   "classifying",
   "extracting",
@@ -35,13 +37,35 @@ export const INGESTION_STAGES = [
 export type IngestionStage = (typeof INGESTION_STAGES)[number];
 
 /**
- * Attempts per ingest job; must match the retryLimit on the queue
- * (src/lib/queue.ts enqueueIngest). pg-boss executes a job at most
- * retryLimit+1 times, so with MAX_ATTEMPTS = retryLimit the executor sees the
- * final attempt first and resolves the job itself instead of letting pg-boss
- * burn one more retry on a document that is already marked failed.
+ * Real stage-error attempts per document: a stage failing for a reason of its
+ * own (bad input, a bug, a non-retryable Kimi error) burns one of these per
+ * execution; the MAX_ATTEMPTS-th failure lands the document in `failed`.
+ *
+ * Kimi OUTAGES (5xx / timeouts / connection failures — KimiError.retryable)
+ * are counted SEPARATELY and do NOT burn these attempts: pg-boss re-runs the
+ * job with its retryDelay backoff up to OUTAGE_RETRY_LIMIT extra times, so a
+ * transient Moonshot incident never eats the document's real attempts. Both
+ * counters live in documents.stage_error (crash-safe; reset by the retry
+ * endpoint and whenever the pipeline advances to a new stage).
  */
 export const MAX_ATTEMPTS = 3;
+
+/** Outage-classed executions tolerated before the document fails anyway. */
+export const OUTAGE_RETRY_LIMIT = 5;
+
+/**
+ * Upper bound on executions of one ingest job — the pg-boss retryLimit in
+ * src/lib/queue.ts enqueueIngest derives from this (retryLimit =
+ * MAX_JOB_EXECUTIONS - 1, since pg-boss runs a job retryLimit+1 times).
+ * The executor force-fails the document when this bound is reached so a
+ * document can never strand in a non-terminal status after pg-boss gives up.
+ */
+export const MAX_JOB_EXECUTIONS = MAX_ATTEMPTS + OUTAGE_RETRY_LIMIT;
+
+/** A Kimi outage: the API answered 5xx/429, timed out, or was unreachable. */
+export function isOutageError(error: unknown): boolean {
+  return error instanceof KimiError && error.retryable;
+}
 
 export interface StageContext {
   documentId: string;
@@ -122,12 +146,28 @@ export const stubStages: Record<IngestionStage, StageRunner> = {
   summarizing: async () => ({ stub: true }),
 };
 
+/**
+ * documents.stage_error: the last failure of the stage currently being
+ * attempted, plus the two attempt counters (see MAX_ATTEMPTS). `kind` is
+ * "outage" for retryable Kimi failures, "error" otherwise. Rows written
+ * before the counters existed simply lack them (read as 0).
+ */
+export interface StageErrorRecord {
+  stage: IngestionStage;
+  message: string;
+  at: string;
+  kind?: "outage" | "error";
+  errorAttempts?: number;
+  outageRetries?: number;
+}
+
 interface DocumentRow {
   id: string;
   status: string;
   sha256: string;
   original_filename: string;
   parent_document_id: string | null;
+  stage_error: StageErrorRecord | null;
 }
 
 export type IngestionOutcome =
@@ -224,10 +264,13 @@ export interface RunIngestionOptions {
 
 /**
  * Executes the pipeline for one document. A stage error on a NON-final
- * attempt records stage_error and rethrows so pg-boss schedules the retry; on
- * the final attempt the document lands in `failed` with a populated
- * stage_error and the job resolves (outcome "failed"), so a hard failure
- * costs exactly MAX_ATTEMPTS executions.
+ * attempt records stage_error (with per-class attempt counters — see
+ * MAX_ATTEMPTS / OUTAGE_RETRY_LIMIT) and rethrows so pg-boss schedules the
+ * retry with backoff; on the final attempt the document lands in `failed`
+ * with a populated stage_error and the job resolves (outcome "failed"). A
+ * hard non-outage failure costs exactly MAX_ATTEMPTS executions; a Kimi
+ * outage costs up to OUTAGE_RETRY_LIMIT extra executions without consuming
+ * any of them.
  */
 export async function runIngestion(
   sql: postgres.Sql,
@@ -239,7 +282,8 @@ export async function runIngestion(
   const now = options.now ?? (() => new Date());
 
   const rows = await sql<DocumentRow[]>`
-    select id, status, sha256, original_filename, parent_document_id
+    select id, status, sha256, original_filename, parent_document_id,
+           stage_error
     from documents
     where id = ${documentId}
   `;
@@ -311,16 +355,51 @@ export async function runIngestion(
         return { kind: "pending", stage, message: error.message };
       }
       const message = error instanceof Error ? error.message : String(error);
-      const finalAttempt = attempt >= MAX_ATTEMPTS;
+      const outage = isOutageError(error);
+
+      // Attempt accounting is per stage: counters accumulate in stage_error
+      // across executions and reset when the pipeline reaches a new stage
+      // (progress) or the retry endpoint clears stage_error. Outage-classed
+      // failures increment their own counter and leave the real-attempt
+      // counter alone — a Moonshot incident never burns ingestion attempts.
+      const prev =
+        document.stage_error && document.stage_error.stage === stage
+          ? document.stage_error
+          : null;
+      const errorAttempts = (prev?.errorAttempts ?? 0) + (outage ? 0 : 1);
+      const outageRetries = (prev?.outageRetries ?? 0) + (outage ? 1 : 0);
+      const exhausted = outage
+        ? outageRetries >= OUTAGE_RETRY_LIMIT
+        : errorAttempts >= MAX_ATTEMPTS;
+      // Backstop: pg-boss stops retrying after MAX_JOB_EXECUTIONS runs, so
+      // the executor must land the document terminally by then no matter how
+      // the failures were classified.
+      const finalAttempt = exhausted || attempt >= MAX_JOB_EXECUTIONS;
+
+      const recordedMessage =
+        outage && finalAttempt
+          ? `Kimi API unavailable after ${outageRetries} attempts with backoff ` +
+            `(${message}). Real ingestion attempts were not consumed. Check ` +
+            `Moonshot status and MOONSHOT_API_KEY/MOONSHOT_BASE_URL, then use ` +
+            `Retry on the document once connectivity is restored.`
+          : message;
+      const stageError: StageErrorRecord = {
+        stage,
+        message: recordedMessage,
+        at: now().toISOString(),
+        kind: outage ? "outage" : "error",
+        errorAttempts,
+        outageRetries,
+      };
       await sql`
         update documents
         set status = ${finalAttempt ? "failed" : stage},
-            stage_error = ${sql.json({ stage, message, at: now().toISOString() })}
+            stage_error = ${sql.json({ ...stageError })}
         where id = ${documentId}
       `;
       if (finalAttempt) {
         await notifyParentOnTerminal(sql, document);
-        return { kind: "failed", stage, message };
+        return { kind: "failed", stage, message: recordedMessage };
       }
       throw error;
     }

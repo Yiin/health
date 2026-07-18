@@ -24,7 +24,12 @@ if (typeof window !== "undefined") {
   );
 }
 
-export const KIMI_API_BASE_URL = "https://api.moonshot.ai/v1";
+/**
+ * Overridable for tests and the compose e2e stack (docker-compose.e2e.yml
+ * points it at the kimi-mock service); production leaves it unset.
+ */
+export const KIMI_API_BASE_URL =
+  process.env.MOONSHOT_BASE_URL ?? "https://api.moonshot.ai/v1";
 
 /** Read timeout for every Kimi call; document extractions can run 4+ minutes. */
 export const KIMI_TIMEOUT_MS = 600_000;
@@ -44,15 +49,17 @@ export type KimiErrorKind =
   | "rate-limit" // 429 — retried
   | "server" // 5xx — retried
   | "timeout" // read/connect timeout — retried
+  | "network" // connection failed (DNS, refused, reset) — retried
   | "context-overflow" // prompt or completion exceeds the model's context/output window
   | "invalid-file" // client-side file validation (extension/size)
   | "api" // any other non-OK API response
-  | "unknown"; // network/parse failures, malformed completions
+  | "unknown"; // parse failures, malformed completions
 
 const RETRYABLE_KINDS: ReadonlySet<KimiErrorKind> = new Set([
   "rate-limit",
   "server",
   "timeout",
+  "network",
 ]);
 
 /** Never wait longer than this on a server-provided Retry-After. */
@@ -229,7 +236,7 @@ export function toKimiError(error: unknown): KimiError {
   }
   if (error instanceof APIConnectionError) {
     return new KimiError(
-      "unknown",
+      "network",
       `Kimi connection failed: ${error.message}`,
       {
         cause: error,
@@ -249,6 +256,17 @@ export function toKimiError(error: unknown): KimiError {
     return new KimiError(
       "timeout",
       `Kimi request timed out after ${KIMI_TIMEOUT_MS}ms`,
+      { cause: error },
+    );
+  }
+  // Plain fetch (kimiFetch) surfaces connection failures as TypeError
+  // "fetch failed" with the socket error as its cause.
+  if (error instanceof TypeError && /fetch failed/i.test(error.message)) {
+    const cause =
+      error.cause instanceof Error ? `: ${error.cause.message}` : "";
+    return new KimiError(
+      "network",
+      `Kimi connection failed${cause || `: ${error.message}`}`,
       { cause: error },
     );
   }

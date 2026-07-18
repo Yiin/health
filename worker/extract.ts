@@ -4,6 +4,9 @@
 //   the normalizing stage (worker/normalize.ts).
 // - apple_health_export: SAX-streamed onto daily_metrics/workouts — see
 //   worker/apple-health/.
+// - wearable_export / fit_export: header-sniffed CSV parser plugins onto
+//   daily_metrics/workouts — see worker/wearable/ (also covers Takeout child
+//   documents, which classify as wearable_export).
 // Every other type passes through with a stub payload until its own
 // extraction lands.
 //
@@ -51,6 +54,7 @@ import {
 import { getOriginalBytes, getOriginalStream } from "../src/lib/storage.ts";
 import { ingestAppleHealthExport } from "./apple-health/index.ts";
 import type { StageHalt, StageRunner } from "./ingestion.ts";
+import { ingestWearableCsv } from "./wearable/index.ts";
 
 /** Prompt version recorded in every raw_extractions('extracting') payload. */
 export const EXTRACT_PROMPT_V1 = "lab-extract-v1";
@@ -478,6 +482,37 @@ export function createExtractStage(deps: ExtractStageDeps): StageRunner {
         metrics: outcome.metrics,
         workouts: outcome.workouts,
         stats: { ...outcome.stats } as Record<string, unknown>,
+      } as postgres.JSONValue;
+    }
+
+    if (
+      document.document_type === "wearable_export" ||
+      document.document_type === "fit_export"
+    ) {
+      const outcome = await ingestWearableCsv(sql, {
+        filename: ctx.originalFilename,
+        openStream: async () => {
+          const body = await openOriginal(document.s3_key);
+          if (!body) {
+            throw new Error(`original ${document.s3_key} missing from storage`);
+          }
+          return body;
+        },
+      });
+      if (outcome.kind === "needs_review") {
+        return {
+          documentType: document.document_type,
+          parser: EXTRACT_PARSER_VERSION,
+          halt: { status: "needs_review", reason: outcome.reason },
+        } as postgres.JSONValue;
+      }
+      return {
+        documentType: document.document_type,
+        parser: EXTRACT_PARSER_VERSION,
+        plugin: outcome.plugin,
+        confidence: outcome.confidence,
+        metrics: outcome.metrics,
+        workouts: outcome.workouts,
       } as postgres.JSONValue;
     }
 

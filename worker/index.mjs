@@ -14,7 +14,7 @@ import postgres from "postgres";
 
 import {
   INGESTION_STAGES,
-  MAX_ATTEMPTS,
+  MAX_JOB_EXECUTIONS,
   runIngestion,
   stubStages,
 } from "./ingestion.ts";
@@ -122,7 +122,7 @@ export async function startWorker(options = {}) {
           throw new Error(`ingest job ${job.id} has no documentId in its data`);
         }
         log.log(
-          `[worker] ingest ${documentId} — attempt ${attempt}/${MAX_ATTEMPTS} (job ${job.id})`,
+          `[worker] ingest ${documentId} — execution ${attempt}/${MAX_JOB_EXECUTIONS} (job ${job.id})`,
         );
         const outcome = await runIngestion(sql, documentId, {
           stages: stageRunners,
@@ -135,7 +135,7 @@ export async function startWorker(options = {}) {
             break;
           case "failed":
             log.error(
-              `[worker] ${documentId} failed at stage "${outcome.stage}" after ${attempt} attempts: ${outcome.message}`,
+              `[worker] ${documentId} failed at stage "${outcome.stage}" on execution ${attempt}: ${outcome.message}`,
             );
             break;
           case "halted":

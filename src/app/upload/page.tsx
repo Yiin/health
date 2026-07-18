@@ -1,5 +1,6 @@
 import { Info } from "lucide-react";
 
+import { IngestionHealthStrip } from "@/components/upload/ingestion-health-strip";
 import { UploadClient } from "@/components/upload/upload-client";
 
 export default function UploadPage() {
@@ -25,6 +26,8 @@ export default function UploadPage() {
           limit, and smaller parts upload more reliably.
         </p>
       </div>
+
+      <IngestionHealthStrip />
 
       <UploadClient />
     </div>

@@ -2,10 +2,13 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { setupTestDb, TEST_DATABASE_URL } from "../src/db/test-utils";
+import { KimiError } from "../src/lib/kimi/client";
 
 import {
   INGESTION_STAGES,
   MAX_ATTEMPTS,
+  MAX_JOB_EXECUTIONS,
+  OUTAGE_RETRY_LIMIT,
   runIngestion,
   StagePendingError,
   stubStages,
@@ -202,6 +205,11 @@ describe("runIngestion", () => {
         throw new Error("boom");
       },
     });
+    for (const attempt of [1, 2]) {
+      await expect(
+        runIngestion(sql, id, { stages: alwaysThrows, attempt }),
+      ).rejects.toThrow("boom");
+    }
     await expect(
       runIngestion(sql, id, { stages: alwaysThrows, attempt: MAX_ATTEMPTS }),
     ).resolves.toMatchObject({ kind: "failed" });
@@ -376,6 +384,11 @@ describe("runIngestion", () => {
         throw new Error("unreadable");
       },
     };
+    for (const attempt of [1, 2]) {
+      await expect(
+        runIngestion(sql, pendingChild, { stages: failing, attempt }),
+      ).rejects.toThrow("unreadable");
+    }
     expect(
       await runIngestion(sql, pendingChild, {
         stages: failing,
@@ -475,5 +488,163 @@ describe("runIngestion", () => {
       status: "needs_review",
     });
     expect((await documentRow(id)).attempts).toBe(0);
+  });
+});
+
+describe("runIngestion — Kimi outage semantics", () => {
+  const outage = () => new KimiError("server", "Kimi server error (503): down");
+
+  it("retries outages with their own counter, then fails with an actionable stage_error", async () => {
+    const id = await insertDocument();
+    const outageStages = countingStages([], {
+      extracting: async () => {
+        throw outage();
+      },
+    });
+
+    // Every pre-final execution rethrows (pg-boss schedules the backoff
+    // retry) and increments ONLY the outage counter.
+    for (let attempt = 1; attempt < OUTAGE_RETRY_LIMIT; attempt += 1) {
+      await expect(
+        runIngestion(sql, id, { stages: outageStages, attempt }),
+      ).rejects.toThrow("down");
+      const doc = await documentRow(id);
+      expect(doc.status).toBe("extracting");
+      expect(doc.stage_error).toMatchObject({
+        stage: "extracting",
+        kind: "outage",
+        outageRetries: attempt,
+        errorAttempts: 0,
+      });
+    }
+
+    const outcome = await runIngestion(sql, id, {
+      stages: outageStages,
+      attempt: OUTAGE_RETRY_LIMIT,
+    });
+    expect(outcome).toMatchObject({ kind: "failed", stage: "extracting" });
+    const doc = await documentRow(id);
+    expect(doc.status).toBe("failed");
+    expect(doc.attempts).toBe(OUTAGE_RETRY_LIMIT);
+    expect(doc.stage_error).toMatchObject({
+      kind: "outage",
+      outageRetries: OUTAGE_RETRY_LIMIT,
+      errorAttempts: 0,
+    });
+    // The recorded message tells the operator what to check and how to
+    // recover — that is the acceptance bar for "actionable".
+    expect(doc.stage_error?.message).toMatch(/Kimi API unavailable/);
+    expect(doc.stage_error?.message).toMatch(/MOONSHOT_API_KEY/);
+    expect(doc.stage_error?.message).toMatch(/Retry/);
+  });
+
+  it("does not burn real attempts on outage executions", async () => {
+    const id = await insertDocument();
+    const errors: Error[] = [
+      outage(),
+      new Error("boom 1"),
+      new Error("boom 2"),
+      new Error("boom 3"),
+    ];
+    const stages = countingStages([], {
+      extracting: async () => {
+        throw errors.shift() ?? new Error("exhausted");
+      },
+    });
+
+    // Outage first, then three real failures: the document still gets its
+    // full MAX_ATTEMPTS real attempts — the outage consumed none of them.
+    for (const attempt of [1, 2, 3]) {
+      await expect(
+        runIngestion(sql, id, { stages, attempt }),
+      ).rejects.toThrow();
+    }
+    expect((await documentRow(id)).stage_error).toMatchObject({
+      kind: "error",
+      errorAttempts: 2,
+      outageRetries: 1,
+    });
+
+    const outcome = await runIngestion(sql, id, { stages, attempt: 4 });
+    expect(outcome).toMatchObject({ kind: "failed", message: "boom 3" });
+    const doc = await documentRow(id);
+    expect(doc.attempts).toBe(4);
+    expect(doc.stage_error).toMatchObject({
+      kind: "error",
+      errorAttempts: MAX_ATTEMPTS,
+      outageRetries: 1,
+    });
+  });
+
+  it("completes normally once connectivity is restored mid-retry", async () => {
+    const id = await insertDocument();
+    let failuresLeft = 2;
+    const flaky = countingStages([], {
+      extracting: async () => {
+        if (failuresLeft > 0) {
+          failuresLeft -= 1;
+          throw outage();
+        }
+        return { recovered: true };
+      },
+    });
+
+    for (const attempt of [1, 2]) {
+      await expect(
+        runIngestion(sql, id, { stages: flaky, attempt }),
+      ).rejects.toThrow("down");
+    }
+    const outcome = await runIngestion(sql, id, { stages: flaky, attempt: 3 });
+    expect(outcome).toEqual({ kind: "done" });
+    const doc = await documentRow(id);
+    expect(doc.status).toBe("done");
+    expect(doc.stage_error).toBeNull();
+  });
+
+  it("resets both counters when the pipeline reaches a new stage", async () => {
+    const id = await insertDocument();
+    let classifyFailures = 1;
+    const stages = countingStages([], {
+      classifying: async () => {
+        if (classifyFailures > 0) {
+          classifyFailures -= 1;
+          throw new Error("classify hiccup");
+        }
+        return { ok: true };
+      },
+      extracting: async () => {
+        throw outage();
+      },
+    });
+
+    await expect(
+      runIngestion(sql, id, { stages, attempt: 1 }),
+    ).rejects.toThrow("classify hiccup");
+    await expect(runIngestion(sql, id, { stages, attempt: 2 })).rejects.toThrow(
+      "down",
+    );
+    // The extracting failure starts from a clean slate: the classifying
+    // counters do not leak into the new stage.
+    expect((await documentRow(id)).stage_error).toMatchObject({
+      stage: "extracting",
+      kind: "outage",
+      outageRetries: 1,
+      errorAttempts: 0,
+    });
+  });
+
+  it("force-fails when pg-boss is out of executions regardless of counters", async () => {
+    const id = await insertDocument();
+    const stages = countingStages([], {
+      extracting: async () => {
+        throw new Error("boom");
+      },
+    });
+    const outcome = await runIngestion(sql, id, {
+      stages,
+      attempt: MAX_JOB_EXECUTIONS,
+    });
+    expect(outcome).toMatchObject({ kind: "failed", stage: "extracting" });
+    expect((await documentRow(id)).status).toBe("failed");
   });
 });

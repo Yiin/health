@@ -11,7 +11,8 @@ RUN npm ci
 # stage, papaparse for wearable CSVs, sax for the Apple Health XML parser,
 # unpdf + zod for lab extraction/normalize, unzipper + its dep chain for
 # the Takeout fan-out — its fs-extra is nested and rides along with the
-# recursive copy of unzipper itself).
+# recursive copy of unzipper itself, @lhncbc/ucum-lhc + its chain for the
+# canonical-unit conversion inside normalize's insertResults).
 # Scoped names need their parent dir created explicitly.
 RUN mkdir -p /worker-modules \
   && for p in pg-boss cron-parser luxon serialize-error non-error type-fest \
@@ -23,7 +24,10 @@ RUN mkdir -p /worker-modules \
     unpdf zod \
     unzipper bluebird duplexer2 graceful-fs node-int64 jsonfile universalify \
     inherits readable-stream core-util-is isarray process-nextick-args \
-    safe-buffer string_decoder util-deprecate; do \
+    safe-buffer string_decoder util-deprecate \
+    @lhncbc/ucum-lhc coffeescript csv-parse csv-stringify lodash.get \
+    escape-html is-integer is-finite stream-transform string-to-stream \
+    xmldoc; do \
     mkdir -p "/worker-modules/$(dirname "$p")" \
     && cp -r "node_modules/$p" "/worker-modules/$p"; \
   done

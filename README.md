@@ -107,17 +107,87 @@ worker. The `ingest` queue uses the exclusive policy, so the singleton key
 running; jobs retry 3 times with backoff and expire after 15 min per attempt.
 
 The worker container runs `node --experimental-strip-types worker/index.mjs`
-(same image as web). Each `ingest` job walks its document through
-classifying → extracting → normalizing → summarizing → done
-(`worker/ingestion.ts`),
-resuming from persisted state: every finished stage caches its payload in
-`raw_extractions` (unique per document+stage), so a retried job never
-re-runs a completed stage, and `documents.status` marks the stage in flight.
-A stage error records `stage_error {stage, message, at}` and rethrows for
-pg-boss to retry; the final attempt lands the document in `failed` instead.
-A stage may also halt the run in a terminal status (`needs_review`/`ignored`)
-via a `halt` marker on its cached payload. SIGTERM stops fetching and lets the
+(same image as web). Each `ingest` job walks its document through the state
+machine in `worker/ingestion.ts`:
+
+```
+                        ┌────────────────────────────────────────────────┐
+                        │                the happy path                  │
+uploaded → classifying → extracting → normalizing → summarizing → done
+   ▲          │              │            │             │
+   │          │  halt marker (scanned PDF, low classifier confidence,
+   │          │  validation sweep failure, unparseable wearable CSV, …)
+   │          └──────────────┴─────┬──────┴─────────────┘
+   │                               ▼
+   │                    needs_review   or   ignored  (unknown documents)
+   │                               │
+   │        POST /api/documents/[id]/retry  (optional "Process as…" hint)
+   └───────────────────────────────┘
+
+any stage ── error, real attempts exhausted (3) ──────────────→ failed
+any stage ── Kimi outage, outage retries exhausted (5) ───────→ failed
+   (failed also recovers through the retry endpoint, back to uploaded)
+```
+
+The pipeline resumes from persisted state: every finished stage caches its
+payload in `raw_extractions` (unique per document+stage), so a retried job
+never re-runs a completed stage, and `documents.status` marks the stage in
+flight. A stage may halt the run in a terminal status
+(`needs_review`/`ignored`) via a `halt` marker on its cached payload. A
+Takeout parent additionally *parks* at `normalizing` (no job scheduled) until
+its child documents all turn terminal. SIGTERM stops fetching and lets the
 active job finish (60s grace, then pg-boss requeues it for the next worker).
+
+### Retry semantics
+
+Two failure classes exist, with separate budgets (`worker/ingestion.ts`;
+counters live in `documents.stage_error`, so they survive worker restarts):
+
+- **Real errors** (a bug, bad input, a non-retryable Kimi reply): each failing
+  execution records `stage_error {stage, message, at, kind: "error"}` and
+  rethrows so pg-boss retries with exponential backoff (30s doubling, 10 min
+  cap). The **3rd** real failure (`MAX_ATTEMPTS`) lands the document in
+  `failed`.
+- **Kimi outages** (5xx, 429, timeouts, connection failures —
+  `KimiError.retryable`): first retried *inside* the call by
+  `src/lib/kimi/client.ts` (3 attempts, exponential backoff, Retry-After
+  aware). If the call still fails, the execution records
+  `stage_error {kind: "outage"}` and rethrows for the same pg-boss backoff —
+  but increments only the **outage** counter, so an outage never burns the
+  document's real attempts. After **5** outage-classed executions
+  (`OUTAGE_RETRY_LIMIT`) the document fails with an actionable
+  `stage_error.message` (what was down, that no real attempts were consumed,
+  and to use Retry once connectivity is back).
+
+The pg-boss job is sent with `retryLimit = 7` (`MAX_JOB_EXECUTIONS - 1`
+in `src/lib/queue.ts`), covering the worst case of 3 real + 5 outage
+executions; the executor force-fails the document if pg-boss ever runs out of
+executions first, so nothing strands mid-pipeline. Counters reset whenever
+the pipeline reaches a new stage, and when the retry endpoint clears
+`stage_error`.
+
+After connectivity is restored, `POST /api/documents/[id]/retry` resets the
+document to `uploaded` and re-enqueues it; completed stages replay from the
+`raw_extractions` cache, so recovery re-runs only what never finished.
+
+### Ingestion health
+
+`GET /api/ingestion/health` returns the pipeline snapshot
+(`src/lib/ingestion-health.ts`):
+
+```json
+{
+  "ok": true,
+  "queue": { "queued": 0, "active": 1 },
+  "documents": { "processing": 1, "failed": 0, "needsReview": 2 }
+}
+```
+
+`queue` is the pg-boss `ingest` queue depth (`created`+`retry` = queued,
+`active` = running) read straight from `pgboss.job`; `documents` counts every
+document by pipeline state. The upload page shows the same numbers as a
+status strip. The endpoint sits behind the basic-auth gate like the rest of
+the API (only `/api/health` is exempt).
 
 The classifying stage (`worker/classify.ts`) is real. Classification is
 two-layer: a deterministic layer
@@ -180,6 +250,36 @@ prints classification, extracted records vs ground truth, token cost, and
 latency. Manual runs only (the API costs money); see `docs/kimi-eval.md` for
 the runbook and the 2026-07-18 findings (LT extraction excellent; scanned
 image-only PDFs need the vision fallback; Tier0 queue copes).
+
+### E2E pipeline test
+
+One command runs the whole stack — web, worker, Postgres, MinIO — with only
+the Moonshot API swapped for a deterministic mock (`scripts/kimi-mock.mjs`),
+uploads one fixture of every supported shape through the real upload route,
+and asserts the final database state per document:
+
+```bash
+npm run e2e     # docker compose -p health-e2e -f docker-compose.yml \
+                #   -f docker-compose.e2e.yml run --build --rm e2e
+npm run e2e:down   # tear the e2e stack down, volumes included
+```
+
+Coverage (`scripts/e2e-pipeline.mjs`): EN + LT lab PDFs land `done` with
+mapped `biomarker_results` (decimal commas and LT aliases included); a
+scanned PDF halts in `needs_review` with a stage_error naming the scan; a
+Garmin CSV and an Apple Health `export.xml` land their `daily_metrics` /
+`workouts`; a Takeout zip fans out a Google Fit child document and the parent
+completes behind the barrier; an unrelated text file is `ignored`. A second
+phase flips the mock into outage mode (every request 503s) and proves the
+retry semantics above end-to-end: exhaustion → `failed` with an actionable
+outage `stage_error` and zero real attempts consumed, then restored
+connectivity + the retry endpoint → `done` with results.
+
+The overlay (`docker-compose.e2e.yml`) publishes no host ports and runs under
+its own compose project, so it never collides with a dev stack. It reads
+passwords from the same `.env` as regular compose (any values work). The
+worker runs with `INGEST_RETRY_DELAY_S=1` there so the outage phase finishes
+in seconds; production keeps the 30s backoff base.
 
 ## Documents library
 
@@ -276,6 +376,29 @@ used by both `web` (default CMD) and `worker` (command override); a push to
 `main` triggers a deploy through the webhook workflow in
 `.github/workflows/deploy.yml`.
 
+### Environment variable reference
+
+| Variable | Used by | Meaning |
+| --- | --- | --- |
+| `POSTGRES_PASSWORD` | db, web, worker | Postgres superuser password (compose wires it into `DATABASE_URL`). |
+| `POSTGRES_DB` | db | Database name; default `health`. Applied only on a fresh volume. |
+| `DATABASE_URL` | host tooling | Host-side URL for `next dev`, drizzle-kit, and scripts; containers get the internal `…@db:5432` URL from compose. |
+| `DB_PORT` | compose | Host loopback port for the db publish; default 5433. VPS: 5433. |
+| `WEB_PORT` | compose | Host loopback port for the web publish; default 3000. **VPS: 3100** (meals owns 3000). |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | minio, web, worker | MinIO root credentials; compose reuses them as the app's S3 keys. |
+| `MINIO_PORT` | compose | Host loopback port for the MinIO publish; default 9000. **VPS: 9080** (ClickHouse owns 9000). |
+| `S3_ENDPOINT` | web, worker | S3 endpoint; `http://minio:9000` in compose. |
+| `S3_BUCKET` | web, worker, bucket-init | Bucket for originals; default `health`. |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | web, worker | S3 credentials (compose injects the MinIO root pair). Also read by the storage integration tests. |
+| `MOONSHOT_API_KEY` | web, worker | Kimi API key. From the local token store (`get-token MOONSHOT_API_KEY`); never committed. |
+| `MOONSHOT_BASE_URL` | web, worker | Kimi API base URL override. Unset in production; the e2e stack points it at kimi-mock. |
+| `KIMI_MODEL_CHAT` | web, worker | Standard pipeline model id; default `kimi-k2.6` (expert stays `kimi-k3`). |
+| `INGEST_RETRY_DELAY_S` | worker, web | Base pg-boss retry delay (seconds, doubling; default 30). Test-only knob — e2e sets 1. |
+| `UPLOAD_MAX_BYTES` | web | Per-file upload cap; default 2 GiB. Lower only for tests. |
+| `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | web | Optional drive-by basic-auth gate; both set = on. |
+| `TEST_DATABASE_URL` | vitest | DB-test override; default `postgres://postgres:postgres@localhost:5433/health_test`. |
+| `MINIO_TEST_BUCKET` | vitest | Storage-test bucket; default `health-test-w4`. |
+
 ### Required Coolify env vars
 
 Set everything from `.env.example` (`POSTGRES_PASSWORD`, `MINIO_ROOT_USER`,
@@ -333,3 +456,74 @@ enabled on the deployment, export `BASIC_AUTH_USER`/`BASIC_AUTH_PASS` first.
 On failure, check the app directly on the VPS
 (`curl -sS http://127.0.0.1:3100/api/health`, expect `{"ok":true}`), then
 `docker ps` and the Coolify deployment logs.
+
+### Runbook
+
+All commands run on the VPS from the app's compose directory (Coolify keeps
+it under `/data/coolify/applications/<uuid>`); `docker compose ps` shows the
+service names.
+
+**Is the pipeline healthy?**
+
+```bash
+curl -sS -u "$BASIC_AUTH_USER:$BASIC_AUTH_PASS" \
+  http://127.0.0.1:3100/api/ingestion/health
+```
+
+A deep `queue.queued` that never drains means the worker is down or stuck;
+growing `documents.failed` means ingestions are exhausting their retries —
+read the per-document `stage_error` to see which stage and why:
+
+```bash
+docker compose exec db psql -U postgres health -c \
+  "select id, original_filename, status, attempts,
+          stage_error->>'stage' as stage, stage_error->>'kind' as kind,
+          stage_error->>'message' as message
+   from documents where status in ('failed','needs_review')
+   order by uploaded_at desc limit 20"
+```
+
+**Restart the worker** (job mid-flight is safe: SIGTERM lets it finish, and
+a killed job resumes from the stage cache):
+
+```bash
+docker compose restart worker
+docker compose logs -f --tail 50 worker
+```
+
+**Re-drive failures.** `stage_error.kind` tells you which lever to pull:
+
+- `outage` — Kimi was unreachable; no real attempts were consumed. Confirm
+  connectivity is back (Moonshot status, `MOONSHOT_API_KEY`,
+  `MOONSHOT_BASE_URL` unset), then re-enqueue — completed stages replay from
+  cache:
+
+  ```bash
+  curl -sS -X POST -u "$BASIC_AUTH_USER:$BASIC_AUTH_PASS" \
+    http://127.0.0.1:3100/api/documents/<id>/retry
+  ```
+
+- `error` — the pipeline hit a real problem three times; retrying without a
+  change usually fails again. Fix the cause (or pick a type via the UI's
+  "Process as…" — a retry with `{"documentType":"…"}` in the body), then
+  retry. For documents that finished `done` against old stage code, `POST
+  /api/documents/<id>/reprocess` clears the stage cache and re-runs
+  everything.
+
+- `needs_review` documents are a product state, not an incident: review in
+  the UI, then Retry / "Process as…".
+
+**Queue surgery** (rare). Inspect and clear pg-boss jobs directly:
+
+```bash
+docker compose exec db psql -U postgres health -c \
+  "select id, state, retry_count, start_after from pgboss.job
+   where name = 'ingest' order by created_on desc limit 20"
+```
+
+Deleting a job row while its document is non-terminal strands the document —
+prefer the retry endpoint, which resets the document AND enqueues a fresh
+job in one transaction.
+
+**Full-stack check before/after risky changes:** `npm run e2e` (see "E2E
+pipeline test") runs the entire ingestion surface against the mock locally.

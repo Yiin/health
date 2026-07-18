@@ -423,6 +423,11 @@ describe("takeout fan-out + barrier (acceptance)", () => {
         throw new Error("not a readable CSV");
       },
     };
+    for (const attempt of [1, 2]) {
+      await expect(
+        runIngestion(sql, corruptChild.id, { stages: corruptStages, attempt }),
+      ).rejects.toThrow("not a readable CSV");
+    }
     expect(
       await runIngestion(sql, corruptChild.id, {
         stages: corruptStages,
