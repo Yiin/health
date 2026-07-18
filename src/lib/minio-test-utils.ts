@@ -13,7 +13,8 @@ import { parseEnv } from "node:util";
  */
 
 // Suffixed per the worker collision rules: compose MinIO may be shared.
-export const MINIO_TEST_BUCKET = "health-test-w4";
+export const MINIO_TEST_BUCKET =
+  process.env.MINIO_TEST_BUCKET ?? "health-test-w4";
 
 export interface MinioTestEnv {
   endpoint: string;
