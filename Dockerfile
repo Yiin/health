@@ -11,7 +11,11 @@ RUN npm ci
 # stage, papaparse for wearable CSVs, sax for the Apple Health XML parser,
 # unpdf + zod for lab extraction/normalize, unzipper + its dep chain for
 # the Takeout fan-out — its fs-extra is nested and rides along with the
-# recursive copy of unzipper itself).
+# recursive copy of unzipper itself, @lhncbc/ucum-lhc + its chain for the
+# canonical-unit conversion inside normalize's insertResults, @aws-sdk/*
+# + @smithy/* for src/lib/storage.ts which classify/extract/takeout import).
+# The e2e stack (npm run e2e) boots this worker for real — run it after
+# changing worker imports; a missing package fails the worker at startup.
 # Scoped names need their parent dir created explicitly.
 RUN mkdir -p /worker-modules \
   && for p in pg-boss cron-parser luxon serialize-error non-error type-fest \
@@ -23,7 +27,21 @@ RUN mkdir -p /worker-modules \
     unpdf zod \
     unzipper bluebird duplexer2 graceful-fs node-int64 jsonfile universalify \
     inherits readable-stream core-util-is isarray process-nextick-args \
-    safe-buffer string_decoder util-deprecate; do \
+    safe-buffer string_decoder util-deprecate \
+    @lhncbc/ucum-lhc coffeescript csv-parse csv-stringify lodash.get \
+    escape-html is-integer is-finite stream-transform string-to-stream \
+    xmldoc \
+    @aws-sdk/checksums @aws-sdk/client-s3 @aws-sdk/core \
+    @aws-sdk/credential-provider-env @aws-sdk/credential-provider-http \
+    @aws-sdk/credential-provider-ini @aws-sdk/credential-provider-login \
+    @aws-sdk/credential-provider-node @aws-sdk/credential-provider-process \
+    @aws-sdk/credential-provider-sso @aws-sdk/credential-provider-web-identity \
+    @aws-sdk/lib-storage @aws-sdk/middleware-sdk-s3 @aws-sdk/nested-clients \
+    @aws-sdk/signature-v4-multi-region @aws-sdk/token-providers \
+    @aws-sdk/types @aws-sdk/xml-builder @aws/lambda-invoke-store \
+    @smithy/core @smithy/credential-provider-imds @smithy/fetch-http-handler \
+    @smithy/node-http-handler @smithy/signature-v4 @smithy/types \
+    base64-js bowser buffer events stream-browserify tslib; do \
     mkdir -p "/worker-modules/$(dirname "$p")" \
     && cp -r "node_modules/$p" "/worker-modules/$p"; \
   done

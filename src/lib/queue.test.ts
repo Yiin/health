@@ -7,6 +7,7 @@ import { registerUpload } from "@/db/repos/documents";
 import { setupTestDb, TEST_DATABASE_URL } from "@/db/test-utils";
 import { enqueueIngest, getBoss, INGEST_JOB, stopBoss } from "@/lib/queue";
 import { inTransaction } from "@/lib/uploads";
+import { MAX_JOB_EXECUTIONS } from "../../worker/ingestion";
 
 // The service path (boss + app pool) reads DATABASE_URL; point it at the
 // test database before anything lazily initializes.
@@ -68,7 +69,9 @@ describe("queue (pg-boss)", () => {
       name: INGEST_JOB,
       state: "created",
       singleton_key: sha256,
-      retry_limit: 3,
+      // Sized so 3 real attempts + 5 outage retries fit in one job — see
+      // worker/ingestion.ts MAX_JOB_EXECUTIONS.
+      retry_limit: MAX_JOB_EXECUTIONS - 1,
       retry_backoff: true,
     });
     expect(rows[0]?.data.documentId).toBe(document.id);

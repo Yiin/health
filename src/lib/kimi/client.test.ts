@@ -1,4 +1,4 @@
-import { APIConnectionTimeoutError, APIError } from "openai";
+import { APIConnectionError, APIConnectionTimeoutError, APIError } from "openai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -229,6 +229,24 @@ describe("toKimiError", () => {
       kind: "unknown",
     });
     expect(toKimiError("weird")).toMatchObject({ kind: "unknown" });
+  });
+
+  it("maps connection failures to the retryable network kind", () => {
+    const sdkFailure = toKimiError(
+      new APIConnectionError({ message: "Connection error." }),
+    );
+    expect(sdkFailure).toMatchObject({ kind: "network" });
+    expect(sdkFailure.retryable).toBe(true);
+
+    // Plain fetch (kimiFetch) surfaces refused/reset connections this way.
+    const fetchFailure = toKimiError(
+      new TypeError("fetch failed", {
+        cause: new Error("connect ECONNREFUSED 127.0.0.1:443"),
+      }),
+    );
+    expect(fetchFailure).toMatchObject({ kind: "network" });
+    expect(fetchFailure.retryable).toBe(true);
+    expect(fetchFailure.message).toContain("ECONNREFUSED");
   });
 });
 

@@ -1,5 +1,7 @@
 import { PgBoss } from "pg-boss";
 
+import { MAX_JOB_EXECUTIONS } from "../../worker/ingestion.ts";
+
 /**
  * Shared pg-boss instance: background jobs live on the app Postgres (no
  * Redis). The web process enqueues `ingest` jobs here; the worker container
@@ -59,10 +61,25 @@ export async function stopBoss(): Promise<void> {
 }
 
 /**
+ * Base delay before the first pg-boss retry, in seconds; doubles per retry
+ * (capped at 20x). Tunable ONLY so the compose e2e stack can compress the
+ * outage-retry timeline to seconds — production leaves it at 30.
+ */
+function retryDelaySeconds(): number {
+  const raw = Number(process.env.INGEST_RETRY_DELAY_S);
+  return Number.isFinite(raw) && raw > 0 ? raw : 30;
+}
+
+/**
  * Enqueues ingestion for a document, deduplicated by content: the
  * singletonKey=sha256 on the exclusive-policy queue suppresses a second job
- * while one for the same bytes is still pending or running. Retry policy per
- * the epic: 3 attempts with backoff (30s, doubling).
+ * while one for the same bytes is still pending or running.
+ *
+ * Retry policy: pg-boss re-runs the job with exponential backoff (30s
+ * doubling, 10 min cap) up to MAX_JOB_EXECUTIONS total executions. How those
+ * executions are spent is decided by the executor (worker/ingestion.ts): 3
+ * real stage-error attempts, plus up to 5 outage-classed retries that do NOT
+ * consume them.
  *
  * Pass `db` (a BossTx bound to an open transaction — see
  * src/lib/uploads.ts's inTransaction) to make the enqueue atomic with the
@@ -75,11 +92,13 @@ export async function enqueueIngest(
 ): Promise<string | null> {
   const boss = await getBoss();
   const data: IngestJobData = { documentId: document.id };
+  const retryDelay = retryDelaySeconds();
   return boss.send(INGEST_JOB, data, {
     singletonKey: document.sha256,
-    retryLimit: 3,
-    retryDelay: 30,
+    retryLimit: MAX_JOB_EXECUTIONS - 1,
+    retryDelay,
     retryBackoff: true,
+    retryDelayMax: retryDelay * 20,
     // 15 min per attempt (also pg-boss's default; stated explicitly so the
     // contract survives a default change). Sized for multi-minute Kimi
     // extractions once real stages land.

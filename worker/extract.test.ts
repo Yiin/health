@@ -699,7 +699,7 @@ describe("lab pipeline — extraction failure paths", () => {
     "non-lab documents pass through untouched (stub behavior)",
     { timeout: 30_000 },
     async () => {
-      const id = await insertLabDocument(EN_CBC, "wearable_export");
+      const id = await insertLabDocument(EN_CBC, "medical_doc");
       const { calls, chat } = mockKimi(EN_CBC);
       const outcome = await runIngestion(sql, id, {
         stages: labStages(chat, fixtureBytes(EN_CBC.filename)),
@@ -710,11 +710,11 @@ describe("lab pipeline — extraction failure paths", () => {
       expect(await resultRows()).toHaveLength(0);
       expect(await payloadOf(id, "extracting")).toMatchObject({
         skipped: true,
-        documentType: "wearable_export",
+        documentType: "medical_doc",
       });
       expect(await payloadOf(id, "normalizing")).toMatchObject({
         skipped: true,
-        documentType: "wearable_export",
+        documentType: "medical_doc",
       });
     },
   );
@@ -1106,16 +1106,57 @@ describe("createExtractStage", () => {
   });
 
   it("passes unhandled document types through untouched", async () => {
-    const id = await insertDocument("wearable_export");
+    const id = await insertDocument("unknown");
     const stage = createExtractStage({
       sql,
       openOriginal: () => {
-        throw new Error("must not be called for non-apple types");
+        throw new Error("must not be called for unhandled types");
       },
     });
 
     const payload = await stage(ctxFor(id));
-    expect(payload).toEqual({ skipped: true, documentType: "wearable_export" });
+    expect(payload).toEqual({ skipped: true, documentType: "unknown" });
+  });
+
+  it("routes wearable_export documents through the CSV parser plugins", async () => {
+    const id = await insertDocument("wearable_export");
+    const csv = fixtureBytes("wearable-garmin.csv");
+    const stage = createExtractStage({
+      sql,
+      openOriginal: () => Promise.resolve(Readable.from([Buffer.from(csv)])),
+    });
+
+    const payload = await stage({
+      documentId: id,
+      sha256: "deadbeef",
+      originalFilename: "wearable-garmin.csv",
+      attempt: 1,
+    });
+
+    expect(payload).toMatchObject({
+      documentType: "wearable_export",
+      plugin: "garmin",
+    });
+    expect(stageHaltOf(payload)).toBeNull();
+
+    const [steps] = await sql<{ value: number }[]>`
+      select value::float8 as value from daily_metrics
+      where source = 'garmin' and metric = 'steps' and metric_on = '2024-03-01'
+    `;
+    expect(steps?.value).toBe(9234);
+  });
+
+  it("halts a wearable_export no plugin claims in needs_review", async () => {
+    const id = await insertDocument("wearable_export");
+    const stage = createExtractStage({
+      sql,
+      openOriginal: () =>
+        Promise.resolve(Readable.from(["colour,shape\nred,circle\n"])),
+    });
+
+    const payload = await stage(ctxFor(id));
+    const halt = stageHaltOf(payload);
+    expect(halt?.status).toBe("needs_review");
   });
 
   it("throws when the original is missing from storage (transient)", async () => {
