@@ -119,8 +119,8 @@ machine in `worker/ingestion.ts`:
                         │                the happy path                  │
 uploaded → classifying → extracting → normalizing → summarizing → done
    ▲          │              │            │             │
-   │          │  halt marker (scanned PDF, low classifier confidence,
-   │          │  validation sweep failure, unparseable wearable CSV, …)
+   │          │  halt marker (blank or 20+-page scan, low classifier
+   │          │  confidence, validation sweep failure, unparseable CSV, …)
    │          └──────────────┴─────┬──────┴─────────────┘
    │                               ▼
    │                    needs_review   or   ignored  (unknown documents)
@@ -138,7 +138,7 @@ payload in `raw_extractions` (unique per document+stage), so a retried job
 never re-runs a completed stage, and `documents.status` marks the stage in
 flight. A stage may halt the run in a terminal status
 (`needs_review`/`ignored`) via a `halt` marker on its cached payload. A
-Takeout parent additionally *parks* at `normalizing` (no job scheduled) until
+Takeout parent additionally _parks_ at `normalizing` (no job scheduled) until
 its child documents all turn terminal. SIGTERM stops fetching and lets the
 active job finish (60s grace, then pg-boss requeues it for the next worker).
 
@@ -153,7 +153,7 @@ counters live in `documents.stage_error`, so they survive worker restarts):
   cap). The **3rd** real failure (`MAX_ATTEMPTS`) lands the document in
   `failed`.
 - **Kimi outages** (5xx, 429, timeouts, connection failures —
-  `KimiError.retryable`): first retried *inside* the call by
+  `KimiError.retryable`): first retried _inside_ the call by
   `src/lib/kimi/client.ts` (3 attempts, exponential backoff, Retry-After
   aware). If the call still fails, the execution records
   `stage_error {kind: "outage"}` and rethrows for the same pg-boss backoff —
@@ -291,11 +291,14 @@ npm run e2e:down   # tear the e2e stack down, volumes included
 ```
 
 Coverage (`scripts/e2e-pipeline.mjs`): EN + LT lab PDFs land `done` with
-mapped `biomarker_results` (decimal commas and LT aliases included); a
-scanned PDF halts in `needs_review` with a stage_error naming the scan; a
-Garmin CSV and an Apple Health `export.xml` land their `daily_metrics` /
-`workouts`; a Takeout zip fans out a Google Fit child document and the parent
-completes behind the barrier; an unrelated text file is `ignored`. A second
+mapped `biomarker_results` (decimal commas and LT aliases included); a blank
+scanned PDF goes through the vision path, validly yields zero analytes, and
+halts in `needs_review`; a scanned copy of the EN report lands `done` through
+vision (rasterize → `ms://` page uploads → vision extraction) with every row
+deduped against the digital original; a Garmin CSV and an Apple Health
+`export.xml` land their `daily_metrics` / `workouts`; a Takeout zip fans out
+a Google Fit child document and the parent completes behind the barrier; an
+unrelated text file is `ignored`. A second
 phase flips the mock into outage mode (every request 503s) and proves the
 retry semantics above end-to-end: exhaustion → `failed` with an actionable
 outage `stage_error` and zero real attempts consumed, then restored
@@ -404,26 +407,26 @@ used by both `web` (default CMD) and `worker` (command override); a push to
 
 ### Environment variable reference
 
-| Variable | Used by | Meaning |
-| --- | --- | --- |
-| `POSTGRES_PASSWORD` | db, web, worker | Postgres superuser password (compose wires it into `DATABASE_URL`). |
-| `POSTGRES_DB` | db | Database name; default `health`. Applied only on a fresh volume. |
-| `DATABASE_URL` | host tooling | Host-side URL for `next dev`, drizzle-kit, and scripts; containers get the internal `…@db:5432` URL from compose. |
-| `DB_PORT` | compose | Host loopback port for the db publish; default 5433. VPS: 5433. |
-| `WEB_PORT` | compose | Host loopback port for the web publish; default 3000. **VPS: 3100** (meals owns 3000). |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | minio, web, worker | MinIO root credentials; compose reuses them as the app's S3 keys. |
-| `MINIO_PORT` | compose | Host loopback port for the MinIO publish; default 9000. **VPS: 9080** (ClickHouse owns 9000). |
-| `S3_ENDPOINT` | web, worker | S3 endpoint; `http://minio:9000` in compose. |
-| `S3_BUCKET` | web, worker, bucket-init | Bucket for originals; default `health`. |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | web, worker | S3 credentials (compose injects the MinIO root pair). Also read by the storage integration tests. |
-| `MOONSHOT_API_KEY` | web, worker | Kimi API key. From the local token store (`get-token MOONSHOT_API_KEY`); never committed. |
-| `MOONSHOT_BASE_URL` | web, worker | Kimi API base URL override. Unset in production; the e2e stack points it at kimi-mock. |
-| `KIMI_MODEL_CHAT` | web, worker | Standard pipeline model id; default `kimi-k2.6` (expert stays `kimi-k3`). |
-| `INGEST_RETRY_DELAY_S` | worker, web | Base pg-boss retry delay (seconds, doubling; default 30). Test-only knob — e2e sets 1. |
-| `UPLOAD_MAX_BYTES` | web | Per-file upload cap; default 2 GiB. Lower only for tests. |
-| `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | web | Optional drive-by basic-auth gate; both set = on. |
-| `TEST_DATABASE_URL` | vitest | DB-test override; default `postgres://postgres:postgres@localhost:5433/health_test`. |
-| `MINIO_TEST_BUCKET` | vitest | Storage-test bucket; default `health-test-w4`. |
+| Variable                                    | Used by                  | Meaning                                                                                                           |
+| ------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`                         | db, web, worker          | Postgres superuser password (compose wires it into `DATABASE_URL`).                                               |
+| `POSTGRES_DB`                               | db                       | Database name; default `health`. Applied only on a fresh volume.                                                  |
+| `DATABASE_URL`                              | host tooling             | Host-side URL for `next dev`, drizzle-kit, and scripts; containers get the internal `…@db:5432` URL from compose. |
+| `DB_PORT`                                   | compose                  | Host loopback port for the db publish; default 5433. VPS: 5433.                                                   |
+| `WEB_PORT`                                  | compose                  | Host loopback port for the web publish; default 3000. **VPS: 3100** (meals owns 3000).                            |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`   | minio, web, worker       | MinIO root credentials; compose reuses them as the app's S3 keys.                                                 |
+| `MINIO_PORT`                                | compose                  | Host loopback port for the MinIO publish; default 9000. **VPS: 9080** (ClickHouse owns 9000).                     |
+| `S3_ENDPOINT`                               | web, worker              | S3 endpoint; `http://minio:9000` in compose.                                                                      |
+| `S3_BUCKET`                                 | web, worker, bucket-init | Bucket for originals; default `health`.                                                                           |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | web, worker              | S3 credentials (compose injects the MinIO root pair). Also read by the storage integration tests.                 |
+| `MOONSHOT_API_KEY`                          | web, worker              | Kimi API key. From the local token store (`get-token MOONSHOT_API_KEY`); never committed.                         |
+| `MOONSHOT_BASE_URL`                         | web, worker              | Kimi API base URL override. Unset in production; the e2e stack points it at kimi-mock.                            |
+| `KIMI_MODEL_CHAT`                           | web, worker              | Standard pipeline model id; default `kimi-k2.6` (expert stays `kimi-k3`).                                         |
+| `INGEST_RETRY_DELAY_S`                      | worker, web              | Base pg-boss retry delay (seconds, doubling; default 30). Test-only knob — e2e sets 1.                            |
+| `UPLOAD_MAX_BYTES`                          | web                      | Per-file upload cap; default 2 GiB. Lower only for tests.                                                         |
+| `BASIC_AUTH_USER` / `BASIC_AUTH_PASS`       | web                      | Optional drive-by basic-auth gate; both set = on.                                                                 |
+| `TEST_DATABASE_URL`                         | vitest                   | DB-test override; default `postgres://postgres:postgres@localhost:5433/health_test`.                              |
+| `MINIO_TEST_BUCKET`                         | vitest                   | Storage-test bucket; default `health-test-w4`.                                                                    |
 
 ### Required Coolify env vars
 
@@ -533,7 +536,7 @@ docker compose logs -f --tail 50 worker
   change usually fails again. Fix the cause (or pick a type via the UI's
   "Process as…" — a retry with `{"documentType":"…"}` in the body), then
   retry. For documents that finished `done` against old stage code, `POST
-  /api/documents/<id>/reprocess` clears the stage cache and re-runs
+/api/documents/<id>/reprocess` clears the stage cache and re-runs
   everything.
 
 - `needs_review` documents are a product state, not an incident: review in

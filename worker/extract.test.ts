@@ -1106,7 +1106,7 @@ describe("createExtractStage", () => {
   });
 
   it("passes unhandled document types through untouched", async () => {
-    const id = await insertDocument("medical_doc");
+    const id = await insertDocument("unknown");
     const stage = createExtractStage({
       sql,
       openOriginal: () => {
@@ -1115,7 +1115,7 @@ describe("createExtractStage", () => {
     });
 
     const payload = await stage(ctxFor(id));
-    expect(payload).toEqual({ skipped: true, documentType: "medical_doc" });
+    expect(payload).toEqual({ skipped: true, documentType: "unknown" });
   });
 
   it("routes wearable_export documents through the CSV parser plugins", async () => {

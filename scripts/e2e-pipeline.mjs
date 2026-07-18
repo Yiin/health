@@ -410,14 +410,17 @@ async function phaseHappyPath() {
     );
   }
 
-  // --- Scanned PDF ------------------------------------------------------
+  // --- Scanned PDF (blank scan) -----------------------------------------
+  // scanned.pdf has no text layer AND no readable content: the worker
+  // rasterizes it, vision extraction validly returns zero analytes, and the
+  // document parks in needs_review for a human.
   {
     const doc = await documentRow(uploads.get("scanned.pdf"));
     console.log("[e2e] scanned.pdf:");
     check("status needs_review", doc.status === "needs_review", doc.status);
     check(
-      "stage_error explains the scanned halt",
-      /scanned/i.test(doc.stage_error?.message ?? ""),
+      "stage_error explains the empty scan",
+      /no analytes/i.test(doc.stage_error?.message ?? ""),
       JSON.stringify(doc.stage_error),
     );
   }
@@ -537,6 +540,69 @@ async function phaseHappyPath() {
       "classified unknown",
       doc.document_type === "unknown",
       doc.document_type,
+    );
+  }
+
+  // --- Scanned lab PDF (vision path) ------------------------------------
+  // scanned-lab.pdf is an image-only render of the SAME report as en-cbc.pdf.
+  // It is uploaded only after the digital original has settled, so the
+  // outcome is deterministic: vision reads the page images (rasterize →
+  // ms:// uploads → vision chat), and every extracted row dedups against the
+  // (biomarker, date, value) unique index instead of doubling the results.
+  {
+    const scanUploads = await uploadFiles([
+      {
+        filename: "scanned-lab.pdf",
+        bytes: fixture("scanned-lab.pdf"),
+        contentType: "application/pdf",
+      },
+    ]);
+    const scanId = scanUploads.get("scanned-lab.pdf");
+    await waitForTerminal([scanId], 240_000);
+    const doc = await documentRow(scanId);
+    console.log("[e2e] scanned-lab.pdf:");
+    check(
+      "status done",
+      doc.status === "done",
+      `got ${doc.status} ${JSON.stringify(doc.stage_error)}`,
+    );
+    check(
+      "classified lab_report",
+      doc.document_type === "lab_report",
+      doc.document_type,
+    );
+    check(
+      "provider read from the page images",
+      doc.provider === "City Central Laboratory",
+      String(doc.provider),
+    );
+    check(
+      "document date read from the page images",
+      doc.document_date === "2026-03-14",
+      String(doc.document_date),
+    );
+    const [extracting] = await sql`
+      select payload from raw_extractions
+      where document_id = ${scanId} and stage = 'extracting'
+    `;
+    check(
+      "extraction went through the vision path with a full analyte set",
+      extracting?.payload?.vision === true &&
+        (extracting?.payload?.extraction?.biomarkers?.length ?? 0) >= 10,
+      JSON.stringify({
+        vision: extracting?.payload?.vision,
+        biomarkers: extracting?.payload?.extraction?.biomarkers?.length,
+      }),
+    );
+    const [{ count: hemoglobinRows }] = await sql`
+      select count(*)::int as count
+      from biomarker_results r join biomarkers b on b.id = r.biomarker_id
+      where b.slug = 'hemoglobin' and r.measured_on = '2026-03-14'
+    `;
+    check(
+      "scan of an already-ingested report dedups (one hemoglobin row)",
+      hemoglobinRows === 1,
+      `got ${hemoglobinRows}`,
     );
   }
 }

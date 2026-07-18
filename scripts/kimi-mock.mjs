@@ -192,7 +192,7 @@ function fixtureBiomarker([name, value, unit, ref, flag]) {
 }
 
 /**
- * Deterministic "extraction", two strategies:
+ * Deterministic "extraction", three strategies:
  * 1. Line parsing with the fixtures' 2+-space column discipline
  *    (name  value  unit  reference  flag) — works for plain-text documents,
  *    whose newlines survive into the prompt.
@@ -200,8 +200,30 @@ function fixtureBiomarker([name, value, unit, ref, flag]) {
  *    layer to one newline-less line, so (mirroring the unit tests' mockKimi)
  *    the reply is the fixture's analytes whose names actually appear in the
  *    extracted text.
+ * 3. Vision requests (page images of a scan) carry NO document text at all —
+ *    only the instruction part's "Filename:" line identifies the document, so
+ *    the reply is keyed on the image-only fixtures' filenames. The blank
+ *    scanned.pdf matches nothing and yields an empty extraction, which the
+ *    worker parks in needs_review ("no biomarkers in scan").
  */
 function labExtractionReply(userContent) {
+  const filename = /Filename:\s*(\S+)/.exec(userContent)?.[1] ?? "";
+  if (/scanned-lab/i.test(filename)) {
+    // Image-only render of the EN report (fixtures/health-docs/generate.mjs).
+    return {
+      measuredAt: EN_CBC.measuredOn,
+      labName: EN_CBC.labName,
+      biomarkers: EN_CBC.analytes.map(fixtureBiomarker),
+    };
+  }
+  if (/lab-photo/i.test(filename)) {
+    // JPEG photo of the LT report.
+    return {
+      measuredAt: LT_LAB.measuredOn,
+      labName: LT_LAB.labName,
+      biomarkers: LT_LAB.analytes.map(fixtureBiomarker),
+    };
+  }
   const biomarkers = [];
   for (const line of userContent.split("\n")) {
     const columns = line.trim().split(/\s{2,}/);
@@ -252,10 +274,27 @@ function biomarkerMappingReply(userContent) {
   return { mappings: names.map((name) => ({ name, slug: null })) };
 }
 
+/**
+ * User-message content → text. Vision requests carry an array of parts
+ * (text instruction + ms:// image_url references); only the text parts
+ * matter to the deterministic dispatch.
+ */
+function contentText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((part) => part?.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+  }
+  return "";
+}
+
 function chatReply(body) {
   const schemaName = body?.response_format?.json_schema?.name ?? "";
-  const userContent =
-    body?.messages?.filter((m) => m.role === "user").at(-1)?.content ?? "";
+  const userContent = contentText(
+    body?.messages?.filter((m) => m.role === "user").at(-1)?.content,
+  );
   switch (schemaName) {
     case "health_document_classification":
       return classificationReply(userContent);
