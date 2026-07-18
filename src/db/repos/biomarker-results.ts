@@ -6,7 +6,7 @@
 import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { convertToCanonical } from "../../lib/units";
+import { convertToCanonical } from "../../lib/units.ts";
 
 import {
   aiInsights,
@@ -19,8 +19,8 @@ import {
   type BiomarkerResultOverrides,
   type NewBiomarkerResult,
   type ResultFlag,
-} from "../schema";
-import type * as schema from "../schema";
+} from "../schema.ts";
+import type * as schema from "../schema.ts";
 
 type Db = PostgresJsDatabase<typeof schema>;
 
