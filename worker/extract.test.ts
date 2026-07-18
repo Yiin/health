@@ -9,6 +9,7 @@
 // Storage (readBytes/openOriginal) and Kimi are injected, so no MinIO/Kimi is
 // needed; everything runs against the shared health_test database.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { Readable } from "node:stream";
 
@@ -19,10 +20,16 @@ import { BIOMARKER_SEED } from "../src/db/seed/biomarkers";
 import { setupTestDb, TEST_DATABASE_URL } from "../src/db/test-utils";
 import type { ChatStructuredParams } from "../src/lib/kimi/client";
 import { EN_CBC, LT_LAB } from "../fixtures/health-docs/content.mjs";
+import { buildImagePdf } from "../fixtures/health-docs/generate.mjs";
 
 import { SMALL_EXPORT_XML } from "./apple-health/fixture";
 import { APPLE_HEALTH_PROGRESS_STAGE } from "./apple-health/index";
-import { createExtractStage, EXTRACT_PROMPT_V1 } from "./extract";
+import {
+  createExtractStage,
+  EXTRACT_PROMPT_V1,
+  EXTRACT_VISION_PROMPT_V1,
+  MEDICAL_DOC_PROMPT_V1,
+} from "./extract";
 import {
   runIngestion,
   stageHaltOf,
@@ -31,6 +38,7 @@ import {
   type StageRunner,
 } from "./ingestion";
 import { createNormalizeStage, NORMALIZE_PROMPT_V1 } from "./normalize";
+import { MAX_VISION_PAGES } from "./vision";
 
 setupTestDb();
 
@@ -73,7 +81,9 @@ interface FixtureDef {
 interface RecordedCall {
   model: string | undefined;
   schemaName: string;
-  userContent: string;
+  userContent: unknown;
+  /** True when the user message carried image parts (vision path). */
+  vision: boolean;
 }
 
 function parseFixtureRef(ref: string): Record<string, unknown> {
@@ -97,27 +107,61 @@ interface MockKimiOptions {
    * the fixture-derived reply.
    */
   onExtractionCall?: (callNumber: number, userContent: string) => string | null;
+  /**
+   * Overrides the VISION extraction reply (the user message carries image
+   * parts the mock cannot inspect): 1-based call number, raw reply string or
+   * null to fall through to the full-fixture reply.
+   */
+  onVisionCall?: (callNumber: number) => string | null;
+  /** Reply for medical_doc_extraction calls (defaults to a clinic letter). */
+  medicalReply?: Record<string, unknown>;
+}
+
+const DEFAULT_MEDICAL_REPLY = {
+  provider: "Vilnius City Clinic",
+  documentDate: "2026-02-10",
+  summary: "Discharge letter documenting a routine follow-up visit.",
+  keyFindings: ["Blood pressure within range", "Continue current medication"],
+};
+
+/** Fixture analyte row → lab_extraction biomarker object. */
+function fixtureBiomarker(analyte: string[]): Record<string, unknown> {
+  const [name, value, unit, ref, flag] = analyte;
+  return {
+    name,
+    value: Number(value.replace(",", ".")),
+    unit,
+    referenceLow: null,
+    referenceHigh: null,
+    referenceText: null,
+    ...parseFixtureRef(ref),
+    flag: flag === "H" ? "high" : flag === "L" ? "low" : null,
+  };
 }
 
 /**
- * Deterministic Kimi stand-in. For lab_extraction calls it returns the
- * fixture's analytes whose names ACTUALLY appear in the extracted text —
- * analytes lost by unpdf would silently drop out of the reply and fail the
- * count assertions. For biomarker_mapping calls it answers from `mappings`.
+ * Deterministic Kimi stand-in. For lab_extraction calls on the TEXT path it
+ * returns the fixture's analytes whose names ACTUALLY appear in the extracted
+ * text — analytes lost by unpdf would silently drop out of the reply and fail
+ * the count assertions. For VISION calls (image parts the mock cannot see) it
+ * returns the full fixture. For biomarker_mapping calls it answers from
+ * `mappings`, and for medical_doc_extraction calls from `medicalReply`.
  */
 function mockKimi(fixture: FixtureDef, options: MockKimiOptions = {}) {
   const calls: RecordedCall[] = [];
   const chat = async (params: ChatStructuredParams): Promise<string> => {
-    const userContent = params.messages.at(-1)?.content as string;
+    const content = params.messages.at(-1)?.content;
+    const vision = Array.isArray(content);
     calls.push({
       model: params.model,
       schemaName: params.schema.name,
-      userContent,
+      userContent: content,
+      vision,
     });
     if (params.schema.name === "biomarker_mapping") {
-      const names = [...userContent.matchAll(/- "([^"]+)" \(unit:/g)].map(
-        (m) => m[1],
-      );
+      const names = [
+        ...(content as string).matchAll(/- "([^"]+)" \(unit:/g),
+      ].map((m) => m[1]);
       return JSON.stringify({
         mappings: names.map((name) => ({
           name,
@@ -125,20 +169,25 @@ function mockKimi(fixture: FixtureDef, options: MockKimiOptions = {}) {
         })),
       });
     }
+    if (params.schema.name === "medical_doc_extraction") {
+      return JSON.stringify(options.medicalReply ?? DEFAULT_MEDICAL_REPLY);
+    }
+    if (vision) {
+      const override = options.onVisionCall?.(calls.length);
+      if (override !== null && override !== undefined) return override;
+      // The mock cannot OCR the page images — return every fixture analyte.
+      return JSON.stringify({
+        measuredAt: fixture.measuredOn,
+        labName: fixture.labName,
+        biomarkers: fixture.analytes.map(fixtureBiomarker),
+      });
+    }
+    const userContent = content as string;
     const override = options.onExtractionCall?.(calls.length, userContent);
     if (override !== null && override !== undefined) return override;
     const biomarkers = fixture.analytes
       .filter(([name]) => userContent.includes(name))
-      .map(([name, value, unit, ref, flag]) => ({
-        name,
-        value: Number(value.replace(",", ".")),
-        unit,
-        referenceLow: null,
-        referenceHigh: null,
-        referenceText: null,
-        ...parseFixtureRef(ref),
-        flag: flag === "H" ? "high" : flag === "L" ? "low" : null,
-      }));
+      .map(fixtureBiomarker);
     return JSON.stringify({
       measuredAt: fixture.measuredOn,
       labName: fixture.labName,
@@ -174,6 +223,12 @@ async function insertLabDocument(
 function labStages(
   chat: (params: ChatStructuredParams) => Promise<string>,
   bytes: Uint8Array,
+  visionOverrides: Partial<
+    Pick<
+      import("./extract").ExtractStageDeps,
+      "rasterizePdf" | "uploadVisionImage" | "deleteVisionImage"
+    >
+  > = {},
 ): Record<string, StageRunner> {
   return {
     ...stubStages,
@@ -181,23 +236,52 @@ function labStages(
       sql,
       chatStructured: chat,
       readBytes: async () => bytes,
+      ...visionOverrides,
     }),
     normalizing: createNormalizeStage({ sql, chatStructured: chat }),
   };
 }
 
+/** Fake vision uploads: fake ms:// refs, recorded for assertions. */
+function fakeVisionUploads() {
+  const uploads: { byteLength: number; filename: string }[] = [];
+  const deletes: string[] = [];
+  return {
+    uploads,
+    deletes,
+    uploadVisionImage: async (bytes: Uint8Array, filename: string) => {
+      uploads.push({ byteLength: bytes.length, filename });
+      return `ms://fake-${uploads.length}`;
+    },
+    deleteVisionImage: async (url: string) => {
+      deletes.push(url);
+    },
+  };
+}
+
+const POPPLER_AVAILABLE = (() => {
+  try {
+    execFileSync("pdftoppm", ["-v"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 async function documentRow(id: string) {
   const rows = await sql<
     {
       status: string;
+      document_type: string;
       document_date: string | null;
       provider: string | null;
+      ai_summary: string | null;
       extracted_text: string | null;
       stage_error: { stage: string; message: string } | null;
     }[]
   >`
-    select status, document_date::text as document_date, provider,
-           extracted_text, stage_error
+    select status, document_type, document_date::text as document_date,
+           provider, ai_summary, extracted_text, stage_error
     from documents where id = ${id}
   `;
   return rows[0];
@@ -528,17 +612,68 @@ describe("lab pipeline — extraction failure paths", () => {
   );
 
   it(
-    "a scanned PDF (no text layer) halts in needs_review without calling Kimi",
+    "vision extraction failing validation on every model halts in needs_review",
     { timeout: 30_000 },
     async () => {
-      const fixture = {
-        ...EN_CBC,
-        filename: "scanned.pdf",
-      };
+      const fixture = { ...EN_CBC, filename: "scanned-lab.pdf" };
+      const id = await insertLabDocument(fixture);
+      const { uploads, deletes, ...vision } = fakeVisionUploads();
+      const { calls, chat } = mockKimi(fixture, {
+        onVisionCall: () => "{this is not valid json",
+      });
+      const outcome = await runIngestion(sql, id, {
+        stages: labStages(chat, fixtureBytes("scanned-lab.pdf"), {
+          rasterizePdf: async () => ({
+            kind: "ok",
+            pages: [new Uint8Array([0xff, 0xd8, 0xff, 0xd9])],
+            pageCount: 1,
+          }),
+          ...vision,
+        }),
+      });
+
+      expect(outcome).toEqual({
+        kind: "halted",
+        stage: "extracting",
+        status: "needs_review",
+      });
+      // k2.6 → k2.6 retry (error appended) → k3 escalation; then it stops.
+      expect(calls.map((c) => c.model)).toEqual([
+        "kimi-k2.6",
+        "kimi-k2.6",
+        "kimi-k3",
+      ]);
+      expect(calls.every((c) => c.vision)).toBe(true);
+      // The retry note rides along as an extra text part after the images.
+      const retryContent = calls[1].userContent as { type: string; text?: string }[];
+      expect(
+        retryContent.some(
+          (part) => part.type === "text" && part.text?.includes("failed validation"),
+        ),
+      ).toBe(true);
+
+      const document = await documentRow(id);
+      expect(document.status).toBe("needs_review");
+      expect(document.stage_error?.stage).toBe("extracting");
+      expect(document.stage_error?.message).toContain("failed validation");
+      expect(await resultRows()).toHaveLength(0);
+      // The uploaded page was cleaned up even though extraction failed.
+      expect(deletes).toEqual(["ms://fake-1"]);
+      expect(uploads).toHaveLength(1);
+    },
+  );
+
+  it(
+    "a PDF poppler cannot read halts needs_review (rasterization failed)",
+    { timeout: 30_000 },
+    async () => {
+      const fixture = { ...EN_CBC, filename: "scanned-lab.pdf" };
       const id = await insertLabDocument(fixture);
       const { calls, chat } = mockKimi(fixture);
       const outcome = await runIngestion(sql, id, {
-        stages: labStages(chat, fixtureBytes("scanned.pdf")),
+        stages: labStages(chat, fixtureBytes("scanned-lab.pdf"), {
+          rasterizePdf: async () => ({ kind: "failed", detail: "boom" }),
+        }),
       });
 
       expect(outcome).toEqual({
@@ -547,13 +682,10 @@ describe("lab pipeline — extraction failure paths", () => {
         status: "needs_review",
       });
       expect(calls).toHaveLength(0);
-      const document = await documentRow(id);
-      expect(document.status).toBe("needs_review");
-      expect(document.stage_error?.message).toContain("scanned");
       const extractPayload = await payloadOf(id, "extracting");
       expect(extractPayload?.halt).toMatchObject({
         status: "needs_review",
-        reason: "scanned",
+        reason: "rasterization failed",
       });
     },
   );
@@ -578,6 +710,265 @@ describe("lab pipeline — extraction failure paths", () => {
       expect(await payloadOf(id, "normalizing")).toMatchObject({
         skipped: true,
         documentType: "wearable_export",
+      });
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Vision path (health-etv.11): scanned PDFs are rasterized with poppler and
+// re-read through Kimi vision with the SAME biomarker schema; image files go
+// lab-first and fall through to the medical-document extraction; medical_doc
+// scans go straight to medical vision. Kimi and the uploads are mocked; the
+// rasterizer is real poppler where marked (skipped without poppler-utils).
+// ---------------------------------------------------------------------------
+
+describe("lab pipeline — vision path", () => {
+  it(
+    "a scanned (image-only) lab PDF produces the same biomarker rows as text",
+    { timeout: 30_000 },
+    async () => {
+      const fixture = { ...EN_CBC, filename: "scanned-lab.pdf" };
+      const id = await insertLabDocument(fixture);
+      const { uploads, deletes, ...vision } = fakeVisionUploads();
+      const { calls, chat } = mockKimi(fixture, {
+        mappings: { Carbamide: "bun", Homocysteine: null },
+      });
+      // Real poppler rasterization of the real fixture — the injected seams
+      // are only the Kimi uploads.
+      const outcome = await runIngestion(sql, id, {
+        stages: labStages(chat, fixtureBytes("scanned-lab.pdf"), vision),
+      });
+
+      expect(outcome).toEqual({ kind: "done" });
+      const document = await documentRow(id);
+      expect(document.status).toBe("done");
+      expect(document.document_date).toBe("2026-03-14");
+      expect(document.provider).toBe("City Central Laboratory");
+      // A scanned PDF has no text layer to persist.
+      expect(document.extracted_text).toBeNull();
+
+      // Same rows as the text path: 21 analytes minus unmapped Homocysteine.
+      const results = await resultRows();
+      expect(results.length).toBe(20);
+      const bySlug = new Map(results.map((r) => [r.slug, r]));
+      expect(bySlug.get("hemoglobin")?.value).toBe(14.2);
+      expect(bySlug.get("glucose")?.value_canonical).toBeCloseTo(5.273, 2);
+      expect(bySlug.get("ldl")?.flag).toBe("high");
+      expect(bySlug.get("hemoglobin")?.document_id).toBe(id);
+
+      const extractPayload = await payloadOf(id, "extracting");
+      expect(extractPayload?.promptVersion).toBe(EXTRACT_VISION_PROMPT_V1);
+      expect(extractPayload?.vision).toBe(true);
+      expect(extractPayload?.pageCount).toBe(1);
+      expect(
+        (extractPayload?.extraction as { biomarkers: unknown[] }).biomarkers,
+      ).toHaveLength(21);
+      const normalizePayload = await payloadOf(id, "normalizing");
+      expect(normalizePayload?.inserted).toBe(20);
+
+      // One vision lab_extraction call + one text mapping call.
+      expect(calls.map((c) => c.schemaName)).toEqual([
+        "lab_extraction",
+        "biomarker_mapping",
+      ]);
+      expect(calls[0].vision).toBe(true);
+      // The single rasterized page was uploaded and cleaned up afterwards.
+      expect(uploads.map((u) => u.filename)).toEqual([
+        "scanned-lab.pdf.page-1.jpg",
+      ]);
+      expect(deletes).toEqual(["ms://fake-1"]);
+    },
+  );
+
+  it.skipIf(!POPPLER_AVAILABLE)(
+    `a >${MAX_VISION_PAGES}-page scan halts in needs_review without calling Kimi`,
+    { timeout: 30_000 },
+    async () => {
+      const fixture = { ...EN_CBC, filename: "scanned-lab.pdf" };
+      const id = await insertLabDocument(fixture);
+      const photo = fixtureBytes("lab-photo.jpg");
+      const jpeg = Buffer.from(photo.buffer, photo.byteOffset, photo.length);
+      const bigScan = buildImagePdf(
+        Array.from({ length: MAX_VISION_PAGES + 1 }, () => jpeg),
+      );
+      const { calls, chat } = mockKimi(fixture);
+      const outcome = await runIngestion(sql, id, {
+        stages: labStages(chat, new Uint8Array(bigScan)),
+      });
+
+      expect(outcome).toEqual({
+        kind: "halted",
+        stage: "extracting",
+        status: "needs_review",
+      });
+      expect(calls).toHaveLength(0);
+      const document = await documentRow(id);
+      expect(document.status).toBe("needs_review");
+      expect(document.stage_error?.message).toContain(
+        `${MAX_VISION_PAGES + 1} pages`,
+      );
+      const extractPayload = await payloadOf(id, "extracting");
+      expect(extractPayload?.halt).toMatchObject({
+        status: "needs_review",
+        reason: "too many pages",
+      });
+    },
+  );
+
+  it(
+    "a JPG photo of a lab report (document_type image) yields biomarker rows",
+    { timeout: 30_000 },
+    async () => {
+      const fixture = { ...LT_LAB, filename: "lab-photo.jpg" };
+      const id = await insertLabDocument(fixture, "image");
+      const { uploads, deletes, ...vision } = fakeVisionUploads();
+      const { calls, chat } = mockKimi(fixture);
+      const outcome = await runIngestion(sql, id, {
+        stages: labStages(chat, fixtureBytes("lab-photo.jpg"), {
+          // A single image must never touch the rasterizer.
+          rasterizePdf: async () => {
+            throw new Error("rasterize must not run for image files");
+          },
+          ...vision,
+        }),
+      });
+
+      expect(outcome).toEqual({ kind: "done" });
+      const document = await documentRow(id);
+      // The image proved to be a lab report: the type is promoted so the
+      // normalizing stage persisted its rows.
+      expect(document.document_type).toBe("lab_report");
+      expect(document.document_date).toBe("2026-04-02");
+      expect(document.provider).toBe("SYNLAB Lietuva");
+
+      const results = await resultRows();
+      expect(results.length).toBe(LT_LAB.analytes.length); // all 11
+      const bySlug = new Map(results.map((r) => [r.slug, r]));
+      expect(bySlug.get("glucose")?.value_canonical).toBeCloseTo(5.4, 5);
+      expect(bySlug.get("hemoglobin")?.document_id).toBe(id);
+
+      const extractPayload = await payloadOf(id, "extracting");
+      expect(extractPayload?.vision).toBe(true);
+      expect(extractPayload?.promotedFrom).toBe("image");
+      expect(calls.map((c) => c.schemaName)).toEqual(["lab_extraction"]);
+      // The image itself was uploaded verbatim (no rasterization).
+      expect(uploads.map((u) => u.filename)).toEqual(["lab-photo.jpg"]);
+      expect(deletes).toEqual(["ms://fake-1"]);
+      const normalizePayload = await payloadOf(id, "normalizing");
+      expect(normalizePayload?.inserted).toBe(LT_LAB.analytes.length);
+    },
+  );
+
+  it(
+    "an image with no analytes falls through to medical-doc extraction",
+    { timeout: 30_000 },
+    async () => {
+      const fixture = { ...LT_LAB, filename: "lab-photo.jpg" };
+      const id = await insertLabDocument(fixture, "image");
+      const { deletes, ...vision } = fakeVisionUploads();
+      const { calls, chat } = mockKimi(fixture, {
+        onVisionCall: (callNumber) =>
+          callNumber === 1
+            ? JSON.stringify({
+                measuredAt: fixture.measuredOn,
+                labName: "",
+                biomarkers: [],
+              })
+            : null,
+      });
+      const outcome = await runIngestion(sql, id, {
+        stages: labStages(chat, fixtureBytes("lab-photo.jpg"), vision),
+      });
+
+      expect(outcome).toEqual({ kind: "done" });
+      const document = await documentRow(id);
+      expect(document.document_type).toBe("medical_doc");
+      expect(document.provider).toBe("Vilnius City Clinic");
+      expect(document.document_date).toBe("2026-02-10");
+      expect(document.ai_summary).toContain("Discharge letter");
+      expect(await resultRows()).toHaveLength(0);
+
+      // Lab first, then the medical extraction — both vision calls.
+      expect(calls.map((c) => c.schemaName)).toEqual([
+        "lab_extraction",
+        "medical_doc_extraction",
+      ]);
+      const extractPayload = await payloadOf(id, "extracting");
+      expect(extractPayload?.promptVersion).toBe(MEDICAL_DOC_PROMPT_V1);
+      expect(extractPayload?.promotedFrom).toBe("image");
+      expect(
+        (extractPayload?.medicalDoc as { keyFindings: string[] }).keyFindings,
+      ).toHaveLength(2);
+      // Nothing for the normalizing stage on a medical_doc.
+      expect(await payloadOf(id, "normalizing")).toMatchObject({
+        skipped: true,
+        documentType: "medical_doc",
+      });
+      expect(deletes.length).toBe(2); // one upload per flow, both cleaned
+    },
+  );
+
+  it(
+    "a scanned medical_doc PDF goes straight to medical vision (no lab call)",
+    { timeout: 30_000 },
+    async () => {
+      const fixture = { ...EN_CBC, filename: "scanned-lab.pdf" };
+      const id = await insertLabDocument(fixture, "medical_doc");
+      const { uploads, deletes, ...vision } = fakeVisionUploads();
+      const { calls, chat } = mockKimi(fixture);
+      const outcome = await runIngestion(sql, id, {
+        stages: labStages(chat, fixtureBytes("scanned-lab.pdf"), {
+          rasterizePdf: async () => ({
+            kind: "ok",
+            pages: [
+              new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+              new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+            ],
+            pageCount: 2,
+          }),
+          ...vision,
+        }),
+      });
+
+      expect(outcome).toEqual({ kind: "done" });
+      const document = await documentRow(id);
+      expect(document.document_type).toBe("medical_doc");
+      expect(document.provider).toBe("Vilnius City Clinic");
+      expect(document.document_date).toBe("2026-02-10");
+      expect(document.ai_summary).toContain("Discharge letter");
+      expect(await resultRows()).toHaveLength(0);
+
+      expect(calls.map((c) => c.schemaName)).toEqual([
+        "medical_doc_extraction",
+      ]);
+      // Both rasterized pages were uploaded, in order, then cleaned up.
+      expect(uploads.map((u) => u.filename)).toEqual([
+        "scanned-lab.pdf.page-1.jpg",
+        "scanned-lab.pdf.page-2.jpg",
+      ]);
+      expect(deletes).toEqual(["ms://fake-1", "ms://fake-2"]);
+      const extractPayload = await payloadOf(id, "extracting");
+      expect(extractPayload?.promptVersion).toBe(MEDICAL_DOC_PROMPT_V1);
+      expect(extractPayload?.pageCount).toBe(2);
+    },
+  );
+
+  it(
+    "a text-readable medical_doc PDF is skipped without calling Kimi",
+    { timeout: 30_000 },
+    async () => {
+      const id = await insertLabDocument(EN_CBC, "medical_doc");
+      const { calls, chat } = mockKimi(EN_CBC);
+      const outcome = await runIngestion(sql, id, {
+        stages: labStages(chat, fixtureBytes(EN_CBC.filename)),
+      });
+
+      expect(outcome).toEqual({ kind: "done" });
+      expect(calls).toHaveLength(0);
+      expect(await payloadOf(id, "extracting")).toMatchObject({
+        skipped: true,
+        documentType: "medical_doc",
       });
     },
   );

@@ -17,6 +17,10 @@ docker compose up -d db minio   # required for the DB and storage integration te
 npm test
 ```
 
+The vision-path tests rasterize fixture PDFs with poppler (`pdftoppm` /
+`pdfinfo`); install `poppler-utils` locally or those cases skip themselves
+(the Docker image already carries the package).
+
 DB-backed tests use a dedicated `health_test` database, created automatically
 by `src/db/test-utils.ts` (migrations in `beforeAll`, table truncation in
 `afterEach`) — they never touch dev data. The default connection is
@@ -145,8 +149,8 @@ mid-parse crash resumes duplicate-free; a
 `raw_extractions('apple_health_progress')` checkpoint row tracks flushed counts
 after every batch. Apple's `export.zip` container itself halts in
 `needs_review` until archive walking lands. For `lab_report` documents,
-extraction reads the text layer with unpdf (below ~100 chars the PDF is
-scanned → `needs_review`, vision path pending), then runs Kimi structured
+extraction reads the text layer with unpdf (pdfjs — note it detaches the
+bytes it is handed, so the stage passes a copy), then runs Kimi structured
 output: k2.6 → one retry with the zod error appended → escalation to the
 expert model (k3) on persistent validation failure or an implausibly small
 analyte count; a full sweep of failures lands in `needs_review` with
@@ -156,7 +160,29 @@ with confirmed LLM mappings written back into `biomarkers.aliases`) and
 persists via `insertResults` (canonical-unit conversion + dedup built in).
 Schemas live in `src/lib/ingest/schemas.ts`, name matching in
 `src/lib/ingest/mapping.ts`; synthetic EN+LT PDF fixtures live in
-`fixtures/health-docs/` (regenerate with `node fixtures/health-docs/generate.mjs`).
+`fixtures/health-docs/` (regenerate with `node fixtures/health-docs/generate.mjs`,
+needs poppler for the image-only fixtures).
+
+**Vision path** (`worker/vision.ts`, used by the extracting stage): when a
+`lab_report` PDF's text layer is implausibly thin (< ~100 chars — a scan),
+the stage rasterizes its pages with poppler's `pdfinfo`/`pdftoppm`
+(apk `poppler-utils` in the worker image — chosen over pdfjs +
+`@napi-rs/canvas`: far slimmer than the skia native module, no npm
+dependency, and the reference renderer copes with PDFs pdfjs chokes on) and
+re-extracts from the page IMAGES with the SAME biomarker zod schema,
+validation/retry/escalation, and persistence code as the text path — a scan
+lands the same `biomarker_results` rows a digital PDF would. Page images go
+to Kimi vision as `ms://` file references (Files API `purpose=image`,
+cleaned up afterwards); documents above 20 pages halt in `needs_review`
+instead. The same machinery covers `image` documents (lab extraction first —
+an image yielding biomarkers is promoted to `lab_report` and normalized as
+usual; one yielding none falls through) and `medical_doc` images/scans:
+those extract `{provider, documentDate, summary, keyFindings}` and update
+`provider`/`document_date`/`ai_summary` on the documents row. Retrying a
+`failed`/`needs_review` document now also drops its cached
+`extracting`/`normalizing` payloads (`src/lib/uploads.ts`), so pre-vision
+'scanned' reviews re-extract through vision on retry — and a "Process as…"
+hint additionally drops the classifying cache so the hint is honored.
 
 The final summarizing stage (`worker/summarize.ts`) runs for every document
 that reaches it: one Kimi call writes the 2-4 sentence `documents.ai_summary`
