@@ -10,9 +10,14 @@ import { describe, expect, test } from "vitest";
 import { aiInsights, documents, type InsightKind } from "../schema";
 import { setupTestDb, TEST_DATABASE_URL } from "../test-utils";
 import {
+  getDocument,
+  listDocumentBiomarkers,
+  listDocumentProviders,
+  listDocuments,
   registerUpload,
   searchDocuments,
   updateExtraction,
+  updateMetadataOverrides,
   updateStatus,
 } from "./documents";
 
@@ -221,7 +226,7 @@ describe("searchDocuments", () => {
     expect(hits).toHaveLength(2);
     expect(hits[0]?.id).toBe(frequent.id);
 
-    const limited = await searchDocuments(getDb(), "glucose", 1);
+    const limited = await searchDocuments(getDb(), "glucose", { limit: 1 });
     expect(limited).toHaveLength(1);
     expect(limited[0]?.id).toBe(frequent.id);
   });
@@ -229,6 +234,161 @@ describe("searchDocuments", () => {
   test("returns nothing when no document matches", async () => {
     await insertDocument({ extractedText: "cholesterol panel" });
     expect(await searchDocuments(getDb(), "nonexistentterm")).toEqual([]);
+  });
+
+  test("type/provider filters match effective (override-aware) values", async () => {
+    const lab = await insertDocument({
+      documentType: "lab_report",
+      provider: "UAB Hila",
+      aiSummary: "ferritin slightly low",
+    });
+    const wearable = await insertDocument({
+      documentType: "wearable_export",
+      provider: "Oura",
+      aiSummary: "ferritin mentioned in notes",
+    });
+
+    const all = await searchDocuments(getDb(), "ferritin");
+    expect(all.map((h) => h.id).sort()).toEqual([lab.id, wearable.id].sort());
+
+    const labsOnly = await searchDocuments(getDb(), "ferritin", {
+      type: "lab_report",
+    });
+    expect(labsOnly.map((h) => h.id)).toEqual([lab.id]);
+
+    const ouraOnly = await searchDocuments(getDb(), "ferritin", {
+      provider: "Oura",
+    });
+    expect(ouraOnly.map((h) => h.id)).toEqual([wearable.id]);
+  });
+});
+
+describe("listDocuments", () => {
+  test("returns newest first with card fields", async () => {
+    const older = await insertDocument({
+      originalFilename: "older.pdf",
+      uploadedAt: new Date("2026-07-01T10:00:00Z"),
+      documentType: "lab_report",
+      provider: "UAB Hila",
+      documentDate: "2026-06-30",
+      aiSummary: "June labs",
+      status: "done",
+    });
+    const newer = await insertDocument({
+      originalFilename: "newer.pdf",
+      uploadedAt: new Date("2026-07-10T10:00:00Z"),
+    });
+
+    const items = await listDocuments(getDb());
+    expect(items.map((i) => i.id)).toEqual([newer.id, older.id]);
+    expect(items[1]).toMatchObject({
+      filename: "older.pdf",
+      status: "done",
+      documentType: "lab_report",
+      provider: "UAB Hila",
+      documentDate: "2026-06-30",
+      summary: "June labs",
+      edited: false,
+    });
+  });
+
+  test("type filter matches the override, not the extracted value", async () => {
+    const doc = await insertDocument({ documentType: "unknown" });
+    await updateMetadataOverrides(getDb(), doc.id, {
+      documentType: "medical_doc",
+    });
+
+    const medical = await listDocuments(getDb(), { type: "medical_doc" });
+    expect(medical.map((i) => i.id)).toEqual([doc.id]);
+    expect(medical[0]?.edited).toBe(true);
+
+    expect(await listDocuments(getDb(), { type: "unknown" })).toEqual([]);
+  });
+
+  test("provider filter and a cleared provider override", async () => {
+    const hila = await insertDocument({ provider: "UAB Hila" });
+    const oura = await insertDocument({ provider: "Oura" });
+
+    expect(
+      (await listDocuments(getDb(), { provider: "Oura" })).map((i) => i.id),
+    ).toEqual([oura.id]);
+
+    // Clearing the provider via override removes the doc from that filter.
+    await updateMetadataOverrides(getDb(), hila.id, { provider: null });
+    expect(await listDocuments(getDb(), { provider: "UAB Hila" })).toEqual([]);
+    const unfiltered = await listDocuments(getDb());
+    expect(unfiltered.find((i) => i.id === hila.id)?.provider).toBeNull();
+  });
+});
+
+describe("updateMetadataOverrides", () => {
+  test("merges across calls and never touches the extracted columns", async () => {
+    const doc = await insertDocument({
+      documentType: "lab_report",
+      provider: "UAB Hila",
+      documentDate: "2026-07-01",
+    });
+
+    await updateMetadataOverrides(getDb(), doc.id, {
+      documentType: "medical_doc",
+    });
+    const updated = await updateMetadataOverrides(getDb(), doc.id, {
+      provider: "Manually set",
+    });
+
+    expect(updated?.metadataOverrides).toEqual({
+      documentType: "medical_doc",
+      provider: "Manually set",
+    });
+    // Extracted columns are untouched — overrides live alongside them.
+    expect(updated?.documentType).toBe("lab_report");
+    expect(updated?.provider).toBe("UAB Hila");
+    expect(updated?.documentDate).toBe("2026-07-01");
+  });
+
+  test("returns undefined for a missing document", async () => {
+    const missing = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await updateMetadataOverrides(getDb(), missing, { provider: "X" }),
+    ).toBeUndefined();
+  });
+});
+
+describe("getDocument", () => {
+  test("returns the full row and undefined when missing", async () => {
+    const doc = await insertDocument({ contentType: "application/pdf" });
+    const found = await getDocument(getDb(), doc.id);
+    expect(found?.id).toBe(doc.id);
+    expect(found?.contentType).toBe("application/pdf");
+    expect(
+      await getDocument(getDb(), "00000000-0000-0000-0000-000000000000"),
+    ).toBeUndefined();
+  });
+});
+
+describe("listDocumentProviders", () => {
+  test("returns distinct effective providers, overrides applied", async () => {
+    await insertDocument({ provider: "UAB Hila" });
+    await insertDocument({ provider: "UAB Hila" });
+    await insertDocument({ provider: "Oura" });
+    await insertDocument({ provider: null });
+    const renamed = await insertDocument({ provider: "Antea" });
+    await updateMetadataOverrides(getDb(), renamed.id, {
+      provider: "Antea Clinic",
+    });
+
+    expect(await listDocumentProviders(getDb())).toEqual([
+      "Antea Clinic",
+      "Oura",
+      "UAB Hila",
+    ]);
+  });
+});
+
+describe("listDocumentBiomarkers", () => {
+  test("returns [] while the labs-domain tables do not exist", async () => {
+    const doc = await insertDocument();
+    expect(await listDocumentBiomarkers(getDb(), doc.id)).toEqual([]);
   });
 });
 
@@ -299,14 +459,17 @@ describe("ai_insights", () => {
   });
 });
 
-// The documents migration adds the biomarker_results.document_id FK only when
-// that table already exists (it is owned by the parallel labs task). Prove
-// the conditional path end-to-end: stub the labs table, apply every migration
-// to a pristine database, and verify ON DELETE SET NULL is enforced.
-describe("biomarker_results FK (conditional)", () => {
-  const FK_DB = "health_test_w8_fk";
+// In the merged migration history 0001_documents lands before the labs
+// migration (0002_silent_tigra), so the conditional DO block in
+// 0001_documents is a no-op on fresh installs and 0002 adds the
+// biomarker_results.document_id FK itself (same constraint name, same
+// ON DELETE SET NULL). Prove the invariant end-to-end: apply every
+// migration to a pristine database and verify the FK exists once and
+// SET NULL is enforced.
+describe("biomarker_results FK", () => {
+  const FK_DB = "health_test_w12_fk";
 
-  test("adds an ON DELETE SET NULL FK when biomarker_results predates the migration", async () => {
+  test("document_id FK exists and ON DELETE SET NULL is enforced", async () => {
     const adminUrl = new URL(TEST_DATABASE_URL);
     adminUrl.pathname = "/postgres";
     const fkUrl = new URL(TEST_DATABASE_URL);
@@ -322,15 +485,6 @@ describe("biomarker_results FK (conditional)", () => {
 
     const conn = postgres(fkUrl.toString(), { max: 1 });
     try {
-      // Minimal stand-in for the labs domain's table.
-      await conn.unsafe(`create extension if not exists pgcrypto`);
-      await conn.unsafe(
-        `create table biomarker_results (
-             id uuid primary key default gen_random_uuid(),
-             document_id uuid
-           )`,
-      );
-
       await migrate(drizzle(conn), { migrationsFolder });
 
       const constraints = await conn<{ conname: string }[]>`
@@ -344,8 +498,15 @@ describe("biomarker_results FK (conditional)", () => {
           values ('fk-test', 'fk.pdf', 'originals/fk/fk-test')
           returning id
         `;
+      const [biomarker] = await conn<{ id: string }[]>`
+          insert into biomarkers (slug, name, category, canonical_unit)
+          values ('fk-test-analyte', 'FK Test Analyte', 'test', 'mg/dL')
+          returning id
+        `;
       await conn`
-          insert into biomarker_results (document_id) values (${doc!.id})
+          insert into biomarker_results
+            (biomarker_id, measured_on, value, unit, document_id)
+          values (${biomarker!.id}, '2026-07-01', 1, 'mg/dL', ${doc!.id})
         `;
       await conn`delete from documents where id = ${doc!.id}`;
 

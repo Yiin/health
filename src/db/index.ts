@@ -31,3 +31,14 @@ export function getDb(): Db {
   }
   return database;
 }
+
+// Same lazily-initialized singleton as a drop-in handle for modules that
+// import `db` directly. The first property access happens at request time,
+// so importing route/page modules at build time still never connects.
+export const db: Db = new Proxy({} as Db, {
+  get(_target, prop) {
+    const database = getDb();
+    const value = Reflect.get(database, prop);
+    return typeof value === "function" ? value.bind(database) : value;
+  },
+});

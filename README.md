@@ -34,12 +34,23 @@ server in `.next/standalone`).
 
 Drizzle ORM + Postgres 16, postgres.js driver. Schema lives in
 `src/db/schema.ts`; generated SQL migrations live in `drizzle/` (committed).
-`src/db/index.ts` lazily builds the singleton from `DATABASE_URL` (`getDb()` /
-`getSqlClient()`), so importing route modules never connects at build time.
+`src/db/index.ts` lazily builds the singleton from `DATABASE_URL` — import
+the `db` proxy directly, or use `getDb()` / `getSqlClient()` for explicit
+access — so importing route modules never connects at build time.
 
 - `npm run db:generate` — diff the schema and emit a new migration into `drizzle/`
 - `npm run db:migrate` — apply pending migrations (host-side; uses `DATABASE_URL` from `.env`)
+- `npm run db:seed` — upsert the biomarker catalog (`src/db/seed/biomarkers.ts`,
+  ~40 analytes with EN+LT aliases and UCUM canonical units) into `biomarkers`;
+  idempotent on slug, safe to re-run
 - `npm run db:studio` — Drizzle Studio UI
+
+Domain modules: `src/lib/units.ts` normalizes as-reported unit strings to UCUM
+and converts values into each biomarker's canonical unit (ucum-lhc for
+commensurable units, the biomarker's molar mass for mol<->mass; `null` when no
+conversion path exists — never guessed). `src/db/repos/biomarker-results.ts`
+holds the results repository (deduping insert, trend series, latest-result
+join) as pure functions taking the drizzle db as their first argument.
 
 Containers apply migrations automatically at start: `web` and `worker` run
 `scripts/migrate.mjs` before booting, and the container refuses to boot if
@@ -75,6 +86,40 @@ holds the shared boss instance used by both the web enqueue path and the
 worker. The `ingest` queue uses the exclusive policy, so the singleton key
 (the file's sha256) suppresses a second job while one is still pending or
 running; jobs retry 3 times with backoff.
+
+## Documents library
+
+`/documents` lists every uploaded file as cards (AI summary, type/provider,
+document date, ingestion status) with a full-text search box (tsvector over
+extracted text + summaries, `ts_headline` snippets) and type/provider filters
+— all server-rendered via query params. `/documents/[id]` shows the full
+summary, biomarkers extracted from the document (once the labs domain lands),
+provenance with a download link (`/api/files/[id]`), a source excerpt, and
+inline-editable metadata.
+
+Metadata edits (type, provider, date) go to `PATCH /api/documents/[id]` and
+are stored in the `metadata_overrides` jsonb column — never in the
+pipeline-extracted columns — so re-running ingestion never clobbers manual
+edits. The UI displays effective values (override wins; an explicit null
+means "cleared") and marks edited documents with an "edited" badge.
+
+## AI chat
+
+`/chat` is a conversational interface over the user's own data. `POST
+/api/chat` runs one turn: Kimi (kimi-k2.6) with OpenAI-compatible tool
+calling — `search_documents`, `get_biomarker_trend`, `get_daily_metrics`,
+`get_document` (`src/lib/chat/tools.ts`) — and streams progress as SSE events
+(`conversation` → `tool` → `citations` → `delta` chunks → `done`). The system
+prompt restricts answers to health questions and requires grounding in tool
+results; the UI renders each cited source as a quoted passage linking to
+`/documents/[id]` (the trust pattern: the quote is what the answer was built
+from).
+
+Conversations persist in `conversations` + `messages` (tool rounds and
+citations as jsonb, `reasoning_content` per assistant message — Kimi thinking
+models require it echoed back in multi-turn histories). The sidebar lists
+conversations with title search and archive (`PATCH
+/api/chat/conversations/[id]`).
 
 ## Basic-auth gate
 
