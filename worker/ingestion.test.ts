@@ -280,6 +280,77 @@ describe("runIngestion", () => {
     });
   });
 
+  it("halts the run when a stage payload carries a halt marker", async () => {
+    const id = await insertDocument();
+    const calls: IngestionStage[] = [];
+    const stages = countingStages(calls, {
+      extracting: async () => ({
+        textChars: 12,
+        halt: { status: "needs_review", reason: "scanned" },
+      }),
+    });
+
+    const outcome = await runIngestion(sql, id, { stages });
+    expect(outcome).toEqual({
+      kind: "halted",
+      stage: "extracting",
+      status: "needs_review",
+    });
+    // Later stages never run; the halt payload is cached like any other.
+    expect(calls).toEqual(["classifying", "extracting"]);
+    expect((await extractionRows(id)).map((r) => r.stage)).toEqual([
+      "classifying",
+      "extracting",
+    ]);
+    const doc = await documentRow(id);
+    expect(doc.status).toBe("needs_review");
+    expect(doc.stage_error).toBeNull();
+    // A halted document is terminal — later jobs are no-ops.
+    expect(await runIngestion(sql, id, { stages })).toEqual({
+      kind: "skipped",
+      status: "needs_review",
+    });
+  });
+
+  it("records stage_error when the halt carries an error message", async () => {
+    const id = await insertDocument();
+    const stages = countingStages([], {
+      extracting: async () => ({
+        halt: {
+          status: "needs_review",
+          reason: "extraction validation failed",
+          error:
+            "extraction failed validation on kimi-k2.6, its retry, and kimi-k3",
+        },
+      }),
+    });
+
+    const outcome = await runIngestion(sql, id, { stages, attempt: 1 });
+    expect(outcome).toEqual({
+      kind: "halted",
+      stage: "extracting",
+      status: "needs_review",
+    });
+    const doc = await documentRow(id);
+    expect(doc.status).toBe("needs_review");
+    expect(doc.stage_error).toMatchObject({
+      stage: "extracting",
+      message:
+        "extraction failed validation on kimi-k2.6, its retry, and kimi-k3",
+    });
+    expect(doc.stage_error?.at).toBeTruthy();
+  });
+
+  it("ignores malformed halt markers and proceeds", async () => {
+    const id = await insertDocument();
+    const stages = countingStages([], {
+      extracting: async () => ({ halt: { status: "done" } }),
+    });
+    const outcome = await runIngestion(sql, id, { stages });
+    expect(outcome).toEqual({ kind: "done" });
+    expect((await documentRow(id)).status).toBe("done");
+  });
+
   it("skips terminal documents without touching attempts", async () => {
     const id = await insertDocument("needs_review");
     expect(await runIngestion(sql, id)).toEqual({
