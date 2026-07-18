@@ -19,6 +19,19 @@ npm test
 Other scripts: `npm run lint`, `npm run format`, `npm run build` (produces the standalone
 server in `.next/standalone`).
 
+## Basic-auth gate
+
+The app sits behind a drive-by HTTP basic-auth gate (`src/proxy.ts`).
+Tailscale already restricts network access to the tailnet, so this is **not
+real auth** — just a barrier against casual browsers on shared tailnet
+devices.
+
+- Set both `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` to enable it: every page
+  and API route then requires the credentials (401 + `WWW-Authenticate`
+  otherwise).
+- Leave either unset (the default) and all requests pass through.
+- `/api/health` is exempt so Docker/Coolify healthchecks keep working.
+
 ## Docker Compose
 
 ```bash

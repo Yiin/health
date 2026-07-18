@@ -16,6 +16,8 @@ services:
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
       KIMI_MODEL_CHAT: ${KIMI_MODEL_CHAT:-kimi-k2.6}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:-}
+      BASIC_AUTH_PASS: ${BASIC_AUTH_PASS:-}
 
   worker:
     build: .
