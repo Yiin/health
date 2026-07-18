@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // Persist the turbopack build cache under .next/cache so the Dockerfile's
+  // BuildKit cache mount carries it across image builds.
+  experimental: {
+    turbopackFileSystemCacheForBuild: true,
+  },
 };
 
 export default nextConfig;

@@ -49,6 +49,25 @@ export function pollIntervalFromEnv(env = process.env) {
 }
 
 /**
+ * Test-only parallelism knob: INGEST_WORKER_CONCURRENCY spawns that many
+ * independent pg-boss workers for the one work() subscription, each fetching
+ * and processing one job at a time. Unset, non-integer, or < 2 → undefined,
+ * keeping pg-boss's default single worker. Production compose never sets it.
+ *
+ * Concurrent execution is safe: runIngestion is per-document, and the only
+ * cross-document coordination is the takeout parent barrier — an atomic
+ * guarded UPDATE (completeParentIfChildrenTerminal, worker/ingestion.ts).
+ * The exclusive queue policy dedups by sha256 at insert (src/lib/queue.ts),
+ * so two workers never run the same content concurrently, and
+ * boss.stop({ graceful: true }) waits for every active job, not just one.
+ */
+export function workerConcurrencyFromEnv(env = process.env) {
+  const parsed = Number(env.INGEST_WORKER_CONCURRENCY);
+  if (!Number.isInteger(parsed) || parsed < 2) return undefined;
+  return parsed;
+}
+
+/**
  * Stage dispatch by document_type: the takeout_archive stages (fan-out and
  * parent barrier) only apply to that type; every other type falls through
  * to the fallback runner (which itself dispatches or stubs by type).
@@ -104,6 +123,7 @@ export async function startWorker(options = {}) {
     databaseUrl = process.env.DATABASE_URL,
     stages,
     pollingIntervalSeconds = pollIntervalFromEnv(),
+    localConcurrency = workerConcurrencyFromEnv(),
     shutdownTimeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS,
     log = console,
   } = options;
@@ -135,6 +155,7 @@ export async function startWorker(options = {}) {
             notifyPollingIntervalSeconds: pollingIntervalSeconds,
           }
         : {}),
+      ...(localConcurrency ? { localConcurrency } : {}),
     },
     // pg-boss v12 always hands the handler an array (batchSize 1 → one job).
     async (jobs) => {

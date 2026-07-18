@@ -16,6 +16,7 @@
     "db:studio": "drizzle-kit studio",
     "e2e": "docker compose -p health-e2e -f docker-compose.yml -f docker-compose.e2e.yml run --rm e2e",
     "e2e:fast": "node --experimental-strip-types scripts/e2e-fast.mjs",
+    "e2e:fast:reset": "node scripts/e2e-fast-reset.mjs",
     "e2e:image": "docker compose -p health-e2e -f docker-compose.yml -f docker-compose.e2e.yml build && docker compose -p health-e2e -f docker-compose.yml -f docker-compose.e2e.yml run --rm e2e",
     "e2e:down": "docker compose -p health-e2e -f docker-compose.yml -f docker-compose.e2e.yml down -v --remove-orphans",
     "verify:deploy": "scripts/verify-deploy.sh"

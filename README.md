@@ -313,6 +313,18 @@ runs the same `scripts/e2e-pipeline.mjs` with identical assertions. It needs
 for the vision-path fixtures. Use `npm run e2e:image` for deploy validation —
 it is the only path that builds and exercises the production image.
 
+`scripts/migrate.mjs` is append-only, so if a migration file is edited in
+place during development, `health_e2e` drifts and migration can no longer
+bring it forward. Reset it surgically instead of nuking dev volumes:
+
+```bash
+npm run e2e:fast:reset   # drop health_e2e, remove the health-e2e bucket
+```
+
+The next `npm run e2e:fast` recreates both from scratch. The reset is
+idempotent and only ever touches the e2e-suffixed resources — the dev
+`health` database/bucket and vitest's `health_test` stay intact.
+
 Coverage (`scripts/e2e-pipeline.mjs`): EN + LT lab PDFs land `done` with
 mapped `biomarker_results` (decimal commas and LT aliases included); a blank
 scanned PDF goes through the vision path, validly yields zero analytes, and
