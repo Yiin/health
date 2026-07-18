@@ -51,9 +51,17 @@ services:
       - ./scripts:/mock/scripts:ro
       - ./fixtures:/mock/fixtures:ro
 
+  # The runner executes straight from bind mounts (kimi-mock pattern) — no
+  # image build. It only needs scripts/, fixtures/, the seed catalog under
+  # src/, and the pure-JS npm closure of e2e-pipeline.mjs + seed-biomarkers.mjs
+  # (postgres, @lhncbc/ucum-lhc), served read-only from the host node_modules
+  # — so `npm install` on the host is a prerequisite. Editing the runner
+  # script never rebuilds anything; only web/worker still build from the
+  # Dockerfile.
   e2e:
-    build: .
+    image: node:22-alpine
     restart: "no"
+    working_dir: /app
     command: node scripts/e2e-pipeline.mjs
     depends_on:
       db:
@@ -74,4 +82,10 @@ services:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-health}
       FIXTURES_DIR: /app/fixtures/health-docs
     volumes:
+      - ./scripts:/app/scripts:ro
       - ./fixtures:/app/fixtures:ro
+      - ./src:/app/src:ro
+      - ./node_modules:/app/node_modules:ro
+      # Module-resolution context (no "type" field today, but keep the
+      # container faithful to how the built image resolved modules).
+      - ./package.json:/app/package.json:ro
