@@ -22,6 +22,19 @@ export interface LabTrendPoint {
   labName?: string | null;
 }
 
+/**
+ * A flagged-draw marker on the chart (from src/lib/flags.ts): a dashed
+ * vertical line at the draw's date with a compact label. Rendered only in
+ * the "full" variant — sparklines stay clean.
+ */
+export interface ChartCallout {
+  /** YYYY-MM-DD — the flagged draw's date. */
+  date: string;
+  /** Compact label ("High 7.2", "+42%", "Reversal"). */
+  label: string;
+  severity?: "warning" | "info";
+}
+
 interface ChartRow {
   ts: number;
   date: string;
@@ -36,6 +49,8 @@ interface ChartRow {
 const OUT_OF_RANGE = "#f87171"; // red-400
 const BAND = "#34d399"; // emerald-400
 const GOAL = "#fbbf24"; // amber-400
+const CALLOUT_WARNING = "#fbbf24"; // amber-400
+const CALLOUT_INFO = "#38bdf8"; // sky-400
 
 const TOOLTIP_STYLE = {
   backgroundColor: "var(--popover)",
@@ -140,6 +155,8 @@ function ChartTooltip({
  * irregular, so the x-axis is a true time scale), an emerald ReferenceArea
  * for the in-range band, red dots for out-of-range draws, and an optional
  * dashed goal line. `variant="spark"` strips axes/tooltip for grid cells.
+ * `callouts` (full variant only) draws a dashed vertical marker with a label
+ * at each flagged draw's date — see src/lib/flags.ts.
  */
 export function TrendChart({
   points,
@@ -147,12 +164,14 @@ export function TrendChart({
   goal = null,
   variant = "full",
   height,
+  callouts = [],
 }: {
   points: LabTrendPoint[];
   unit: string;
   goal?: number | null;
   variant?: "full" | "spark";
   height?: number;
+  callouts?: ChartCallout[];
 }) {
   const spark = variant === "spark";
   const rows = toRows(points);
@@ -218,6 +237,26 @@ export function TrendChart({
               strokeWidth={1}
             />
           )}
+          {!spark &&
+            callouts.map((callout) => {
+              const color =
+                callout.severity === "info" ? CALLOUT_INFO : CALLOUT_WARNING;
+              return (
+                <ReferenceLine
+                  key={`${callout.date}:${callout.label}`}
+                  x={Date.parse(`${callout.date}T00:00:00Z`)}
+                  stroke={color}
+                  strokeDasharray="3 3"
+                  strokeWidth={1}
+                  label={{
+                    value: callout.label,
+                    position: "insideTopLeft",
+                    fontSize: 10,
+                    fill: color,
+                  }}
+                />
+              );
+            })}
           {!spark && <Tooltip content={<ChartTooltip unit={unit} />} />}
           <Line
             dataKey="value"

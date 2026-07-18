@@ -199,6 +199,24 @@ models require it echoed back in multi-turn histories). The sidebar lists
 conversations with title search and archive (`PATCH
 /api/chat/conversations/[id]`).
 
+## Overview, insights & flags
+
+`/` (the overview) is server-rendered from the DB: stat cards for the latest
+key vitals (steps, resting HR, HRV, sleep, weight — newest day per metric via
+`getLatestMetricValues`) plus the biomarker in-range ratio; a "needs
+attention" strip (biomarkers whose latest draw is flagged + failed /
+needs-review documents); the three most recent AI insights; and the five most
+recent uploads. `/insights` shows deterministic flag cards followed by the
+full `ai_insights` feed (kind badge, markdown body, date, and source links
+resolved from `source_refs` — `document` → `/documents/[id]`, `biomarker` →
+`/labs/[slug]`, `biomarker_result` → the slug in its `note`).
+
+The flags come from a deterministic, LLM-free engine (`src/lib/flags.ts`):
+out-of-range vs the draw's reference range, a big delta vs the previous draw
+(25% default, configurable), and a trend reversal (the latest move against an
+established 3+-draw trend). The same flags render as `callouts` on the labs
+detail `TrendChart` — dashed vertical markers at the flagged draws.
+
 ## Basic-auth gate
 
 The app sits behind a drive-by HTTP basic-auth gate (`src/proxy.ts`).

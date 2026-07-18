@@ -294,6 +294,23 @@ export async function listIngestionFeed(
   }));
 }
 
+/**
+ * Documents whose ingestion needs a human: failed or needs_review, newest
+ * upload first — the overview's "needs attention" strip.
+ */
+export async function listDocumentsNeedingAttention(
+  db: Db,
+  options: { limit?: number } = {},
+): Promise<DocumentListItem[]> {
+  const rows = await db
+    .select()
+    .from(documents)
+    .where(inArray(documents.status, ["failed", "needs_review"]))
+    .orderBy(desc(documents.uploadedAt))
+    .limit(options.limit ?? 10);
+  return rows.map(toListItem);
+}
+
 /** Distinct effective providers, for the filter dropdown. */
 export async function listDocumentProviders(db: Db): Promise<string[]> {
   const rows = await db.execute(

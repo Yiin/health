@@ -1,14 +1,17 @@
 import { IngestionStatusStrip } from "@/components/ingestion-status-strip";
-import { PlaceholderPage } from "@/components/placeholder-page";
+import { OverviewView } from "@/components/overview-view";
+import { db } from "@/db";
+import { loadOverviewData } from "@/lib/overview";
 
-export default function OverviewPage() {
+// Reads the database per request; never prerendered at build time.
+export const dynamic = "force-dynamic";
+
+export default async function OverviewPage() {
+  const data = await loadOverviewData(db);
   return (
     <div className="flex flex-col gap-4">
       <IngestionStatusStrip />
-      <PlaceholderPage
-        title="Overview"
-        description="A high-level summary of your health data — recent labs, vitals, and AI insights."
-      />
+      <OverviewView data={data} />
     </div>
   );
 }

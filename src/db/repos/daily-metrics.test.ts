@@ -4,6 +4,7 @@ import { dailyMetrics } from "../schema";
 import { setupTestDb } from "../test-utils";
 import {
   getDailySummary,
+  getLatestMetricValues,
   getMetricSeries,
   getMetricSources,
   upsertMetrics,
@@ -180,5 +181,46 @@ describe("getMetricSources", () => {
 
   it("returns an empty array for an unknown metric", async () => {
     expect(await getMetricSources(getDb(), "no_such_metric")).toEqual([]);
+  });
+});
+
+
+describe("getLatestMetricValues", () => {
+  it("picks the newest day per metric, ties broken by source name", async () => {
+    const db = getDb();
+    await upsertMetrics(db, [
+      row({ metricOn: "2026-01-10", value: 8000 }),
+      row({ metricOn: "2026-01-12", source: "oura", value: 10000 }),
+      // Same newest day from two sources — alphabetically-first wins.
+      row({ metricOn: "2026-01-12", source: "google_fit", value: 9500 }),
+      row({
+        metric: "resting_hr",
+        metricOn: "2026-01-11",
+        source: "garmin",
+        value: 55,
+        unit: "bpm",
+      }),
+    ]);
+
+    expect(await getLatestMetricValues(db)).toEqual([
+      {
+        metric: "resting_hr",
+        metricOn: "2026-01-11",
+        value: 55,
+        unit: "bpm",
+        source: "garmin",
+      },
+      {
+        metric: "steps",
+        metricOn: "2026-01-12",
+        value: 9500,
+        unit: "count",
+        source: "google_fit",
+      },
+    ]);
+  });
+
+  it("returns an empty array when no metrics are stored", async () => {
+    expect(await getLatestMetricValues(getDb())).toEqual([]);
   });
 });

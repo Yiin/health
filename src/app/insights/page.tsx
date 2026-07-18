@@ -1,10 +1,11 @@
-import { PlaceholderPage } from "@/components/placeholder-page";
+import { InsightsView } from "@/components/insights-view";
+import { db } from "@/db";
+import { loadInsightsData } from "@/lib/insights";
 
-export default function InsightsPage() {
-  return (
-    <PlaceholderPage
-      title="Insights"
-      description="AI-generated observations about your health data, with cited sources."
-    />
-  );
+// Reads the database per request; never prerendered at build time.
+export const dynamic = "force-dynamic";
+
+export default async function InsightsPage() {
+  const data = await loadInsightsData(db);
+  return <InsightsView data={data} />;
 }
