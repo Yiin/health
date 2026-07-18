@@ -62,12 +62,16 @@ export async function stopBoss(): Promise<void> {
 
 /**
  * Base delay before the first pg-boss retry, in seconds; doubles per retry
- * (capped at 20x). Tunable ONLY so the compose e2e stack can compress the
- * outage-retry timeline to seconds — production leaves it at 30.
+ * (capped at 20x). Tunable ONLY so the e2e stacks can compress the
+ * outage-retry timeline — production leaves it at 30. Zero is allowed and
+ * means immediate retries (pg-boss schedules start_after = now()). Only
+ * non-negative integers are accepted: boss.send asserts
+ * Number.isInteger(retryDelay), so a fractional value would crash the
+ * enqueue — anything else falls back to 30.
  */
-function retryDelaySeconds(): number {
+export function retryDelaySeconds(): number {
   const raw = Number(process.env.INGEST_RETRY_DELAY_S);
-  return Number.isFinite(raw) && raw > 0 ? raw : 30;
+  return Number.isInteger(raw) && raw >= 0 ? raw : 30;
 }
 
 /**

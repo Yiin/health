@@ -5,7 +5,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { getSqlClient } from "@/db";
 import { registerUpload } from "@/db/repos/documents";
 import { setupTestDb, TEST_DATABASE_URL } from "@/db/test-utils";
-import { enqueueIngest, getBoss, INGEST_JOB, stopBoss } from "@/lib/queue";
+import {
+  enqueueIngest,
+  getBoss,
+  INGEST_JOB,
+  retryDelaySeconds,
+  stopBoss,
+} from "@/lib/queue";
 import { inTransaction } from "@/lib/uploads";
 import { MAX_JOB_EXECUTIONS } from "../../worker/ingestion";
 
@@ -39,6 +45,36 @@ async function jobs(): Promise<JobRow[]> {
 async function clearJobs(): Promise<void> {
   await getSqlClient().unsafe("delete from pgboss.job");
 }
+
+describe("retryDelaySeconds", () => {
+  const original = process.env.INGEST_RETRY_DELAY_S;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.INGEST_RETRY_DELAY_S;
+    } else {
+      process.env.INGEST_RETRY_DELAY_S = original;
+    }
+  });
+
+  // Non-negative integers pass through (0 = immediate retries); everything
+  // else falls back to the 30s production default — boss.send asserts
+  // Number.isInteger(retryDelay), so a fractional value must never reach it.
+  it.each<[string, number]>([
+    ["0", 0],
+    ["1", 1],
+    ["0.5", 30],
+    ["-1", 30],
+  ])("parses %j as %d", (value, expected) => {
+    process.env.INGEST_RETRY_DELAY_S = value;
+    expect(retryDelaySeconds()).toBe(expected);
+  });
+
+  it("defaults to 30 when unset", () => {
+    delete process.env.INGEST_RETRY_DELAY_S;
+    expect(retryDelaySeconds()).toBe(30);
+  });
+});
 
 describe("queue (pg-boss)", () => {
   beforeAll(async () => {
