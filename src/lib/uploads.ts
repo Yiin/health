@@ -21,12 +21,18 @@ import { getSqlClient, type Db } from "@/db";
 import {
   getDocument,
   registerUpload,
+  updateMetadataOverrides,
   updateStatus,
 } from "@/db/repos/documents";
 import * as schema from "@/db/schema";
-import type { Document } from "@/db/schema";
+import type { Document, DocumentType } from "@/db/schema";
 import { enqueueIngest, type BossTx } from "@/lib/queue";
 import { putOriginal } from "@/lib/storage";
+
+export {
+  ALLOWED_UPLOAD_TYPES,
+  contentTypeForFilename,
+} from "@/lib/upload-types";
 
 export const UPLOAD_MAX_BYTES_DEFAULT = 2 * 1024 ** 3; // 2 GiB
 
@@ -42,29 +48,6 @@ export function formatBytes(bytes: number): string {
   if (bytes >= 1024 ** 3) return `${bytes / 1024 ** 3} GB`;
   if (bytes >= 1024 ** 2) return `${Math.ceil(bytes / 1024 ** 2)} MB`;
   return `${Math.ceil(bytes / 1024)} KB`;
-}
-
-// Allowlist keyed by extension (client-sent MIME types are untrustworthy):
-// lab PDFs, wearable CSVs, Apple Health export.xml, Takeout/Fit zips, medical
-// document images, plain text/json.
-export const ALLOWED_UPLOAD_TYPES: Record<string, string> = {
-  ".pdf": "application/pdf",
-  ".csv": "text/csv",
-  ".xml": "application/xml",
-  ".zip": "application/zip",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".txt": "text/plain",
-  ".json": "application/json",
-};
-
-/** Canonical content type for an allowed filename, or null when rejected. */
-export function contentTypeForFilename(filename: string): string | null {
-  const dot = filename.lastIndexOf(".");
-  if (dot < 0) return null;
-  return ALLOWED_UPLOAD_TYPES[filename.slice(dot).toLowerCase()] ?? null;
 }
 
 /**
@@ -185,15 +168,25 @@ export type RetryOutcome =
  * Resets a failed/needs_review document to `uploaded` (clearing stage_error,
  * preserving attempts) and re-enqueues its ingest job — atomically, same as
  * the upload path. Any other status is not retryable.
+ *
+ * `opts.documentType` is the "Process as…" hint: it is stored as a metadata
+ * override (the effective type wins over the pipeline-extracted column), so
+ * the classifier sees it on the re-run and the hint survives future re-runs.
  */
 export async function resetDocumentForRetry(
   documentId: string,
+  opts: { documentType?: DocumentType } = {},
 ): Promise<RetryOutcome> {
   return inTransaction(async (txDb, bossTx) => {
     const document = await getDocument(txDb, documentId);
     if (!document) return { kind: "not_found" };
     if (document.status !== "failed" && document.status !== "needs_review") {
       return { kind: "not_retryable", document };
+    }
+    if (opts.documentType) {
+      await updateMetadataOverrides(txDb, documentId, {
+        documentType: opts.documentType,
+      });
     }
     const reset = await updateStatus(txDb, documentId, "uploaded", null);
     if (!reset) return { kind: "not_found" };
