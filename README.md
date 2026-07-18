@@ -111,8 +111,8 @@ pg-boss to retry; the final attempt lands the document in `failed` instead.
 SIGTERM stops fetching and lets the active job finish (60s grace, then
 pg-boss requeues it for the next worker).
 
-The classifying stage (`worker/classify.ts`) is real; extracting and
-normalizing remain stubs. Classification is two-layer: a deterministic layer
+The classifying stage (`worker/classify.ts`) is real. Classification is
+two-layer: a deterministic layer
 (magic bytes via file-type, zip listing markers for Takeout / Apple Health /
 Garmin DI_CONNECT, wearable CSV header shapes) decides without an LLM, and
 only ambiguous containers (PDF, other text) fall back to a Kimi
@@ -124,6 +124,19 @@ in `ignored` — terminal, stored and searchable, never blocking the queue.
 Verdicts persist `document_type`, `classification_confidence` and
 `ai_summary`, and the cached payload can carry a `halt` marker the executor
 turns into those terminal statuses.
+
+The extracting stage (`worker/extract.ts`) dispatches on `document_type`;
+normalizing remains a stub. For `apple_health_export` it streams the XML
+through a SAX parser (`worker/apple-health/` — the whole file is never
+loaded): `<Record>` elements aggregate onto `daily_metrics` per device-local
+day (steps summed; resting HR / HRV / weight averaged; SleepAnalysis
+categories become sleep-stage minutes attributed to the wake day — plain
+HeartRate is deliberately unmapped, it is not resting HR) and `<Workout>`
+elements land in `workouts` with the original element kept in `raw`. Writes
+are batched upserts / insert-or-skips, so a mid-parse crash resumes
+duplicate-free; a `raw_extractions('apple_health_progress')` checkpoint row
+tracks flushed counts after every batch. Apple's `export.zip` container
+itself halts in `needs_review` until archive walking lands.
 
 ## Documents library
 
