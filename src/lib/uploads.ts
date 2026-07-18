@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type postgres from "postgres";
 
@@ -192,5 +193,41 @@ export async function resetDocumentForRetry(
     if (!reset) return { kind: "not_found" };
     const jobId = await enqueueIngest(reset, { db: bossTx });
     return { kind: "retried", document: reset, jobId };
+  });
+}
+
+export type ReprocessOutcome =
+  | { kind: "not_found" }
+  | { kind: "not_reprocessable"; document: Document }
+  | { kind: "reprocessed"; document: Document; jobId: string | null };
+
+/**
+ * Re-runs the WHOLE pipeline for a `done` document: deletes its
+ * raw_extractions stage cache (so a resumed job re-runs every stage against
+ * the current implementation instead of short-circuiting on stale cached
+ * output — the case for documents that finished while stages were stubs),
+ * resets status to `uploaded` (clearing stage_error, preserving attempts and
+ * metadata overrides), and enqueues a fresh ingest job — atomically, same as
+ * the retry path. Only `done` is reprocessable: failed/needs_review documents
+ * go through resetDocumentForRetry, which deliberately RESUMES from the
+ * cache. Derived rows (biomarker_results, metrics) are idempotent on re-run
+ * (dedup/upsert), so they are left in place.
+ */
+export async function reprocessDocument(
+  documentId: string,
+): Promise<ReprocessOutcome> {
+  return inTransaction(async (txDb, bossTx) => {
+    const document = await getDocument(txDb, documentId);
+    if (!document) return { kind: "not_found" };
+    if (document.status !== "done") {
+      return { kind: "not_reprocessable", document };
+    }
+    await txDb
+      .delete(schema.rawExtractions)
+      .where(eq(schema.rawExtractions.documentId, documentId));
+    const reset = await updateStatus(txDb, documentId, "uploaded", null);
+    if (!reset) return { kind: "not_found" };
+    const jobId = await enqueueIngest(reset, { db: bossTx });
+    return { kind: "reprocessed", document: reset, jobId };
   });
 }

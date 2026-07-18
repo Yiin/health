@@ -82,6 +82,12 @@ no new job. `POST /api/documents/[id]/retry` resets a failed/needs_review
 document (attempts preserved) and re-enqueues it; an optional JSON body
 `{ "documentType": "…" }` ("Process as…") stores the type hint as a metadata
 override in the same transaction, so the classifier sees it on the re-run.
+`POST /api/documents/[id]/reprocess` is the done-document counterpart: it
+deletes the document's `raw_extractions` stage cache first (so every stage
+re-runs against the current implementation instead of resuming from stale
+cached output — the recovery for documents processed while stages were
+stubs), then resets to `uploaded` and re-enqueues like retry. The detail
+page surfaces it as a Reprocess button next to the download action.
 
 `/upload` is the drop-anything dropzone (drag-drop or click, per-file XHR
 progress) with a live ingestion feed underneath: it polls
