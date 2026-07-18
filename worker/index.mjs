@@ -19,6 +19,7 @@ import {
   stubStages,
 } from "./ingestion.ts";
 import { createClassifyStage } from "./classify.ts";
+import { createExtractStage } from "./extract.ts";
 
 // Same queue the web enqueue side uses (src/lib/queue.ts); duplicated here
 // because node type stripping cannot resolve that module's import graph.
@@ -28,11 +29,17 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
 
 /**
  * Production stage runners: the real classifying stage (deterministic
- * sniffing + Kimi fallback, worker/classify.ts) plus the remaining stubs.
- * Built per-worker because the classify stage closes over the sql pool.
+ * sniffing + Kimi fallback, worker/classify.ts), the extracting dispatcher
+ * (worker/extract.ts — apple_health_export today, more types landing with
+ * their own issues), plus the remaining stub. Built per-worker because the
+ * stages close over the sql pool.
  */
 export function defaultStages(sql) {
-  return { ...stubStages, classifying: createClassifyStage({ sql }) };
+  return {
+    ...stubStages,
+    classifying: createClassifyStage({ sql }),
+    extracting: createExtractStage({ sql }),
+  };
 }
 
 /**

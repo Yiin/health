@@ -1,0 +1,196 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`50 MB export (acceptance) > parses within a 512 MB heap with exact aggregates (digest snapshot) 1`] = `
+{
+  "fixtureBytes": 52428869,
+  "metrics": {
+    "hrv_ms": {
+      "days": 731,
+      "total": 36923.39999999998,
+    },
+    "resting_hr": {
+      "days": 731,
+      "total": 40756.5,
+    },
+    "sleep_deep_min": {
+      "days": 731,
+      "total": 43538,
+    },
+    "sleep_light_min": {
+      "days": 731,
+      "total": 222285,
+    },
+    "sleep_rem_min": {
+      "days": 731,
+      "total": 69056,
+    },
+    "sleep_total_min": {
+      "days": 732,
+      "total": 337070,
+    },
+    "steps": {
+      "days": 732,
+      "total": 1826735,
+    },
+    "weight_kg": {
+      "days": 105,
+      "total": 7461.2,
+    },
+  },
+  "recordsMapped": 22256,
+  "recordsSeen": 243495,
+  "recordsSkipped": 0,
+  "unmappedTypes": {
+    "HKQuantityTypeIdentifierHeartRate": 219777,
+  },
+  "workouts": 244,
+  "workoutsSkipped": 0,
+}
+`;
+
+exports[`parseAppleHealthXml (pure) > maps the small fixture onto the contract (snapshot) 1`] = `
+[
+  {
+    "metric": "hrv_ms",
+    "metricOn": "2024-03-14",
+    "source": "apple_health",
+    "unit": "ms",
+    "value": 45.4,
+  },
+  {
+    "metric": "resting_hr",
+    "metricOn": "2024-03-14",
+    "source": "apple_health",
+    "unit": "bpm",
+    "value": 60,
+  },
+  {
+    "metric": "sleep_deep_min",
+    "metricOn": "2024-03-14",
+    "source": "apple_health",
+    "unit": "min",
+    "value": 100,
+  },
+  {
+    "metric": "sleep_light_min",
+    "metricOn": "2024-03-14",
+    "source": "apple_health",
+    "unit": "min",
+    "value": 240,
+  },
+  {
+    "metric": "sleep_rem_min",
+    "metricOn": "2024-03-14",
+    "source": "apple_health",
+    "unit": "min",
+    "value": 90,
+  },
+  {
+    "metric": "sleep_total_min",
+    "metricOn": "2024-03-14",
+    "source": "apple_health",
+    "unit": "min",
+    "value": 455,
+  },
+  {
+    "metric": "steps",
+    "metricOn": "2024-03-14",
+    "source": "apple_health",
+    "unit": "count",
+    "value": 500,
+  },
+  {
+    "metric": "weight_kg",
+    "metricOn": "2024-03-14",
+    "source": "apple_health",
+    "unit": "kg",
+    "value": 70.6,
+  },
+  {
+    "metric": "steps",
+    "metricOn": "2024-03-15",
+    "source": "apple_health",
+    "unit": "count",
+    "value": 500,
+  },
+]
+`;
+
+exports[`parseAppleHealthXml (pure) > maps the small fixture onto the contract (snapshot) 2`] = `
+[
+  {
+    "avgHr": 149,
+    "calories": 352,
+    "distanceM": 5210,
+    "durationS": 1950,
+    "endedAt": "2024-03-14T18:02:30+03:00",
+    "maxHr": 171,
+    "raw": {
+      "creationDate": "2024-03-14 18:05:00 +0300",
+      "duration": "32.5",
+      "durationUnit": "min",
+      "endDate": "2024-03-14 18:02:30 +0300",
+      "events": [
+        {
+          "date": "2024-03-14 17:45:00 +0300",
+          "type": "HKWorkoutEventTypePause",
+        },
+      ],
+      "metadata": {
+        "HKIndoorWorkout": "0",
+      },
+      "sourceName": "Apple Watch",
+      "sourceVersion": "10.1",
+      "startDate": "2024-03-14 17:30:00 +0300",
+      "statistics": [
+        {
+          "average": "148.6",
+          "endDate": "2024-03-14 18:02:30 +0300",
+          "maximum": "171.2",
+          "minimum": "102",
+          "startDate": "2024-03-14 17:30:00 +0300",
+          "type": "HKQuantityTypeIdentifierHeartRate",
+          "unit": "count/min",
+        },
+      ],
+      "totalDistance": "5.21",
+      "totalDistanceUnit": "km",
+      "totalEnergyBurned": "352",
+      "totalEnergyBurnedUnit": "kcal",
+      "workoutActivityType": "HKWorkoutActivityTypeRunning",
+    },
+    "source": "apple_health",
+    "startedAt": "2024-03-14T17:30:00+03:00",
+    "type": "running",
+  },
+  {
+    "durationS": 600,
+    "endedAt": "2024-03-15T08:10:00+03:00",
+    "raw": {
+      "duration": "10",
+      "durationUnit": "min",
+      "endDate": "2024-03-15 08:10:00 +0300",
+      "sourceName": "Apple Watch",
+      "startDate": "2024-03-15 08:00:00 +0300",
+      "workoutActivityType": "HKWorkoutActivityTypeWalking",
+    },
+    "source": "apple_health",
+    "startedAt": "2024-03-15T08:00:00+03:00",
+    "type": "walking",
+  },
+]
+`;
+
+exports[`parseAppleHealthXml (pure) > maps the small fixture onto the contract (snapshot) 3`] = `
+{
+  "recordsMapped": 12,
+  "recordsSeen": 19,
+  "recordsSkipped": 2,
+  "unmappedTypes": {
+    "HKQuantityTypeIdentifierActiveEnergyBurned": 2,
+    "HKQuantityTypeIdentifierHeartRate": 1,
+  },
+  "workoutsSeen": 2,
+  "workoutsSkipped": 0,
+}
+`;
