@@ -9,10 +9,13 @@
 //   POST   /v1/chat/completions       (response_format json_schema)
 // plus a control plane for the e2e script:
 //   GET/POST /__mock/mode             {"mode":"ok"|"outage"}
+//   GET/POST /__mock/outage           {"markers":["outage-lab"]} (replace-set)
 //
 // In outage mode every /v1/* request answers 503, mirroring a Moonshot
 // incident; the control plane keeps working so the e2e script can restore
-// connectivity.
+// connectivity. Outage markers scope the same 503 to single documents: any
+// /v1/* request whose filename or prompt contains a marker substring fails
+// while everything else keeps ingesting.
 //
 // Chat replies are dispatched on the json_schema name and derived
 // deterministically from the request content (the same column discipline the
@@ -33,6 +36,13 @@ const LAB_FIXTURES = [EN_CBC, LT_LAB];
 
 /** "ok" | "outage" — toggled by the e2e script via POST /__mock/mode. */
 let mode = "ok";
+
+/**
+ * Case-insensitive filename substrings whose documents get 503s while every
+ * other document keeps working — replaced wholesale via POST /__mock/outage,
+ * so the outage phase can run alongside happy-path ingestion.
+ */
+const outageMarkers = new Set();
 
 /** fileId → original filename of the upload. */
 const files = new Map();
@@ -84,6 +94,17 @@ function parseMultipart(body, contentType) {
     }
   }
   return { fields, filenames };
+}
+
+/** Same 503 the global outage mode answers — the worker must not tell them apart. */
+function outage503(res) {
+  return json(res, 503, { error: { message: "kimi-mock simulated outage" } });
+}
+
+function matchesOutageMarker(text) {
+  if (outageMarkers.size === 0 || !text) return false;
+  const haystack = text.toLowerCase();
+  return [...outageMarkers].some((marker) => haystack.includes(marker));
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +357,21 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { mode });
     }
 
+    if (path === "/__mock/outage") {
+      if (req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString() || "{}");
+        if (!Array.isArray(body.markers)) {
+          return json(res, 400, { error: "markers must be an array" });
+        }
+        outageMarkers.clear();
+        for (const marker of body.markers) {
+          outageMarkers.add(String(marker).toLowerCase());
+        }
+        console.log(`[kimi-mock] outage markers → [${[...outageMarkers]}]`);
+      }
+      return json(res, 200, { markers: [...outageMarkers] });
+    }
+
     if (!path.startsWith("/v1/")) {
       return json(res, 404, { error: { message: `no route for ${path}` } });
     }
@@ -353,6 +389,11 @@ const server = createServer(async (req, res) => {
         req.headers["content-type"],
       );
       const filename = filenames[0] ?? "unnamed";
+      // Marker gate before the no-text-layer 400: a marked scanned upload
+      // must be outage-classed (retryable), not hard-failed.
+      if (filenames.some(matchesOutageMarker)) {
+        return outage503(res);
+      }
       if (fields.purpose === "file-extract" && hasNoTextLayer(filename)) {
         // Moonshot rejects image-only PDFs at upload time with this message.
         return json(res, 400, {
@@ -368,6 +409,9 @@ const server = createServer(async (req, res) => {
     const contentMatch = /^\/v1\/files\/([^/]+)\/content$/.exec(path);
     if (contentMatch && req.method === "GET") {
       const filename = files.get(contentMatch[1]);
+      if (matchesOutageMarker(filename)) {
+        return outage503(res);
+      }
       if (filename === undefined) {
         return json(res, 404, { error: { message: "file not found" } });
       }
@@ -376,12 +420,23 @@ const server = createServer(async (req, res) => {
 
     const fileMatch = /^\/v1\/files\/([^/]+)$/.exec(path);
     if (fileMatch && req.method === "DELETE") {
+      if (matchesOutageMarker(files.get(fileMatch[1]))) {
+        return outage503(res);
+      }
       files.delete(fileMatch[1]);
       return json(res, 200, { deleted: true });
     }
 
     if (path === "/v1/chat/completions" && req.method === "POST") {
       const body = JSON.parse((await readBody(req)).toString());
+      const userContent = contentText(
+        body?.messages?.filter((m) => m.role === "user").at(-1)?.content,
+      );
+      // Every worker prompt embeds "Filename: <original>" (plus the raw text
+      // head for .txt uploads), so the marker reaches the mock in the content.
+      if (matchesOutageMarker(userContent)) {
+        return outage503(res);
+      }
       const reply = chatReply(body);
       console.log(
         `[kimi-mock] chat ${body?.response_format?.json_schema?.name ?? "?"}`,
