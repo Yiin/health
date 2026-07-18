@@ -56,6 +56,9 @@ services:
 
   bucket-init:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    # One-shot job: Coolify injects restart:unless-stopped into compose
+    # services, which would crash-loop this after a successful exit.
+    restart: "no"
     depends_on:
       - minio
     entrypoint:
