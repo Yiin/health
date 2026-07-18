@@ -80,6 +80,10 @@ export async function enqueueIngest(
     retryLimit: 3,
     retryDelay: 30,
     retryBackoff: true,
+    // 15 min per attempt (also pg-boss's default; stated explicitly so the
+    // contract survives a default change). Sized for multi-minute Kimi
+    // extractions once real stages land.
+    expireInSeconds: 900,
     ...(opts.db ? { db: opts.db } : {}),
   });
 }

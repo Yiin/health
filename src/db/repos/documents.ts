@@ -220,19 +220,6 @@ export async function listDocuments(
   return rows.map(toListItem);
 }
 
-/** Full row for the detail page. */
-export async function getDocument(
-  db: Db,
-  documentId: string,
-): Promise<Document | undefined> {
-  const rows = await db
-    .select()
-    .from(documents)
-    .where(eq(documents.id, documentId))
-    .limit(1);
-  return rows[0];
-}
-
 /**
  * Merges user edits into metadata_overrides (jsonb `||`: only the keys
  * present in `overrides` are touched) and returns the updated row. Overrides

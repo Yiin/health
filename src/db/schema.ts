@@ -123,6 +123,36 @@ export const documents = pgTable(
 export type Document = typeof documents.$inferSelect;
 export type NewDocument = typeof documents.$inferInsert;
 
+/**
+ * Per-stage cache of pipeline output: one row per (document, stage), written
+ * by the ingestion worker as each stage completes. A retried/resumed job
+ * reuses the cached payload instead of re-running the stage (stage impls may
+ * be expensive LLM calls), which is also what makes a mid-stage crash safe.
+ */
+export const rawExtractions = pgTable(
+  "raw_extractions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    stage: text("stage").notNull(),
+    payload: jsonb("payload"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("raw_extractions_document_stage_unique").on(
+      table.documentId,
+      table.stage,
+    ),
+  ],
+);
+
+export type RawExtraction = typeof rawExtractions.$inferSelect;
+export type NewRawExtraction = typeof rawExtractions.$inferInsert;
+
 export const INSIGHT_KINDS = [
   "post_ingestion",
   "biomarker_trend",

@@ -84,7 +84,18 @@ Background jobs use pg-boss on the app Postgres (no Redis): `src/lib/queue.ts`
 holds the shared boss instance used by both the web enqueue path and the
 worker. The `ingest` queue uses the exclusive policy, so the singleton key
 (the file's sha256) suppresses a second job while one is still pending or
-running; jobs retry 3 times with backoff.
+running; jobs retry 3 times with backoff and expire after 15 min per attempt.
+
+The worker container runs `node --experimental-strip-types worker/index.mjs`
+(same image as web). Each `ingest` job walks its document through
+classifying → extracting → normalizing → done (`worker/ingestion.ts`),
+resuming from persisted state: every finished stage caches its payload in
+`raw_extractions` (unique per document+stage), so a retried job never
+re-runs a completed stage, and `documents.status` marks the stage in flight.
+A stage error records `stage_error {stage, message, at}` and rethrows for
+pg-boss to retry; the final attempt lands the document in `failed` instead.
+Stage implementations are stubs for now. SIGTERM stops fetching and lets the
+active job finish (60s grace, then pg-boss requeues it for the next worker).
 
 ## Documents library
 
