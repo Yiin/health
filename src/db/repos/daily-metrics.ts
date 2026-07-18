@@ -112,3 +112,29 @@ export async function getDailySummary(
   }
   return summary;
 }
+
+export interface MetricSourceInfo {
+  source: string;
+  /** Most recent day this source reported the metric, YYYY-MM-DD. */
+  latestOn: string;
+}
+
+/**
+ * Every source that has ever reported `metric`, with each source's most
+ * recent day — the input for the vitals UI's source selector and its default
+ * source pick (freshest data wins).
+ */
+export async function getMetricSources(
+  db: Db,
+  metric: string,
+): Promise<MetricSourceInfo[]> {
+  return db
+    .select({
+      source: dailyMetrics.source,
+      latestOn: sql<string>`max(${dailyMetrics.metricOn})`,
+    })
+    .from(dailyMetrics)
+    .where(eq(dailyMetrics.metric, metric))
+    .groupBy(dailyMetrics.source)
+    .orderBy(asc(dailyMetrics.source));
+}
