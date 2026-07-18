@@ -7,6 +7,7 @@ import {
   INGESTION_STAGES,
   MAX_ATTEMPTS,
   runIngestion,
+  StagePendingError,
   stubStages,
   type IngestionStage,
 } from "./ingestion";
@@ -25,6 +26,22 @@ async function insertDocument(status = "uploaded"): Promise<string> {
   const rows = await sql<{ id: string }[]>`
     insert into documents (sha256, original_filename, s3_key, status)
     values (${crypto.randomUUID()}, 'fixture.pdf', 'originals//ab/fixture', ${status})
+    returning id
+  `;
+  return rows[0].id;
+}
+
+async function insertChildDocument(
+  parentId: string,
+  status = "uploaded",
+): Promise<string> {
+  const rows = await sql<{ id: string }[]>`
+    insert into documents
+      (sha256, original_filename, s3_key, status, parent_document_id)
+    values (
+      ${crypto.randomUUID()}, 'inner.csv', 'originals//cd/inner', ${status},
+      ${parentId}
+    )
     returning id
   `;
   return rows[0].id;
@@ -278,6 +295,106 @@ describe("runIngestion", () => {
     expect(await runIngestion(sql, crypto.randomUUID())).toEqual({
       kind: "missing",
     });
+  });
+
+  it("parks a document when a stage throws StagePendingError", async () => {
+    const id = await insertDocument();
+    const calls: IngestionStage[] = [];
+    const parking = countingStages(calls, {
+      normalizing: async () => {
+        throw new StagePendingError("2 of 3 child documents still ingesting");
+      },
+    });
+
+    const outcome = await runIngestion(sql, id, { stages: parking });
+
+    expect(outcome).toEqual({
+      kind: "pending",
+      stage: "normalizing",
+      message: "2 of 3 child documents still ingesting",
+    });
+    const doc = await documentRow(id);
+    // Parked: non-terminal status, no stage_error, no cached payload for the
+    // parking stage, and the job RESOLVED (no pg-boss retry is needed).
+    expect(doc.status).toBe("normalizing");
+    expect(doc.stage_error).toBeNull();
+    expect((await extractionRows(id)).map((r) => r.stage)).toEqual([
+      "classifying",
+      "extracting",
+    ]);
+
+    // A re-driven run re-executes the parking stage (nothing was cached).
+    calls.length = 0;
+    const second = await runIngestion(sql, id, {
+      stages: countingStages(calls),
+    });
+    expect(second).toEqual({ kind: "done" });
+    expect(calls).toEqual(["normalizing"]);
+  });
+
+  it("completes a barrier-parked parent when its last child turns terminal", async () => {
+    const parentId = await insertDocument("normalizing");
+    // Fan-out already happened (the barrier only runs after it is cached).
+    await sql`
+      insert into raw_extractions (document_id, stage, payload)
+      values (${parentId}, 'extracting', ${sql.json({ archive: { files: 2 } })})
+    `;
+    const doneChild = await insertChildDocument(parentId, "done");
+    const runningChild = await insertChildDocument(parentId, "uploaded");
+
+    // First child turning terminal: a sibling is still pending → parked.
+    expect(
+      await runIngestion(sql, runningChild, { stages: stubStages }),
+    ).toEqual({ kind: "done" });
+    expect((await documentRow(parentId)).status).toBe("done");
+
+    const rows = await sql<{ stage: string; payload: unknown }[]>`
+      select stage, payload from raw_extractions
+      where document_id = ${parentId} order by stage
+    `;
+    expect(rows.map((r) => r.stage)).toEqual(["extracting", "normalizing"]);
+    expect(rows[1].payload).toMatchObject({
+      barrier: "children_terminal",
+      childDocumentId: runningChild,
+    });
+    expect(doneChild).toBeTruthy(); // fixture sanity
+  });
+
+  it("leaves the parent parked while any child is non-terminal", async () => {
+    const parentId = await insertDocument("normalizing");
+    const pendingChild = await insertChildDocument(parentId, "uploaded");
+    const finishingChild = await insertChildDocument(parentId, "uploaded");
+
+    await runIngestion(sql, finishingChild, { stages: stubStages });
+    expect((await documentRow(parentId)).status).toBe("normalizing");
+
+    // The sibling finishing — even into a FAILED terminal state — completes
+    // the parent: a failed child does not fail the parent.
+    const failing = {
+      ...stubStages,
+      classifying: async () => {
+        throw new Error("unreadable");
+      },
+    };
+    expect(
+      await runIngestion(sql, pendingChild, {
+        stages: failing,
+        attempt: MAX_ATTEMPTS,
+      }),
+    ).toMatchObject({ kind: "failed" });
+    expect((await documentRow(parentId)).status).toBe("done");
+  });
+
+  it("does not complete a parent that is not parked at the barrier", async () => {
+    // A parent mid-run in its own job (status 'extracting') must be left to
+    // its own barrier stage, not completed by a child.
+    const parentId = await insertDocument("extracting");
+    const childId = await insertChildDocument(parentId, "uploaded");
+
+    expect(await runIngestion(sql, childId, { stages: stubStages })).toEqual({
+      kind: "done",
+    });
+    expect((await documentRow(parentId)).status).toBe("extracting");
   });
 
   it("halts the run when a stage payload carries a halt marker", async () => {
