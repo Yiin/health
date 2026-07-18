@@ -4,9 +4,11 @@
 # disposable:
 #
 #   docker compose -p health-e2e -f docker-compose.yml -f docker-compose.e2e.yml \
-#     run --build --rm e2e
+#     run --rm e2e
 #
-# (npm run e2e wraps exactly that; npm run e2e:down tears the stack down.)
+# (npm run e2e wraps exactly that, reusing the last-built web/worker images;
+# npm run e2e:image rebuilds all service images first — use it before a deploy
+# or after Dockerfile/compose changes. npm run e2e:down tears the stack down.)
 #
 # Host port publishes are reset so an e2e run never collides with a dev stack
 # on the same machine — everything talks over the compose network.
