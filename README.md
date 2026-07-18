@@ -112,7 +112,8 @@ A stage may also halt the run in a terminal status (`needs_review`/`ignored`)
 via a `halt` marker on its cached payload. SIGTERM stops fetching and lets the
 active job finish (60s grace, then pg-boss requeues it for the next worker).
 
-The classifying stage (`worker/classify.ts`) is real. Classification is two-layer: a deterministic layer
+The classifying stage (`worker/classify.ts`) is real. Classification is
+two-layer: a deterministic layer
 (magic bytes via file-type, zip listing markers for Takeout / Apple Health /
 Garmin DI_CONNECT, wearable CSV header shapes) decides without an LLM, and
 only ambiguous containers (PDF, other text) fall back to a Kimi
@@ -125,18 +126,28 @@ Verdicts persist `document_type`, `classification_confidence` and
 `ai_summary`, and the cached payload can carry a `halt` marker the executor
 turns into those terminal statuses.
 
-The extracting + normalizing stages are implemented for `lab_report`
-documents (`worker/extract.ts`, `worker/normalize.ts`; other types pass
-through as no-ops until their stages land). Extraction reads the text layer
-with unpdf (below ~100 chars the PDF is scanned → `needs_review`, vision path
-pending), then runs Kimi structured output: k2.6 → one retry with the zod
-error appended → escalation to the expert model (k3) on persistent validation
-failure or an implausibly small analyte count; a full sweep of failures lands
-in `needs_review` with `stage_error`. Normalization maps analyte names onto
-the biomarkers catalog (exact alias → fuzzy → batched LLM mapping, with
-confirmed LLM mappings written back into `biomarkers.aliases`) and persists
-via `insertResults` (canonical-unit conversion + dedup built in). Schemas
-live in `src/lib/ingest/schemas.ts`, name matching in
+The extracting stage (`worker/extract.ts`) dispatches on `document_type`. For
+`apple_health_export` it streams the XML through a SAX parser
+(`worker/apple-health/` — the whole file is never loaded): `<Record>` elements
+aggregate onto `daily_metrics` per device-local day (steps summed; resting HR /
+HRV / weight averaged; SleepAnalysis categories become sleep-stage minutes
+attributed to the wake day — plain HeartRate is deliberately unmapped, it is
+not resting HR) and `<Workout>` elements land in `workouts` with the original
+element kept in `raw`. Writes are batched upserts / insert-or-skips, so a
+mid-parse crash resumes duplicate-free; a
+`raw_extractions('apple_health_progress')` checkpoint row tracks flushed counts
+after every batch. Apple's `export.zip` container itself halts in
+`needs_review` until archive walking lands. For `lab_report` documents,
+extraction reads the text layer with unpdf (below ~100 chars the PDF is
+scanned → `needs_review`, vision path pending), then runs Kimi structured
+output: k2.6 → one retry with the zod error appended → escalation to the
+expert model (k3) on persistent validation failure or an implausibly small
+analyte count; a full sweep of failures lands in `needs_review` with
+`stage_error`. The normalizing stage (`worker/normalize.ts`) maps analyte
+names onto the biomarkers catalog (exact alias → fuzzy → batched LLM mapping,
+with confirmed LLM mappings written back into `biomarkers.aliases`) and
+persists via `insertResults` (canonical-unit conversion + dedup built in).
+Schemas live in `src/lib/ingest/schemas.ts`, name matching in
 `src/lib/ingest/mapping.ts`; synthetic EN+LT PDF fixtures live in
 `fixtures/health-docs/` (regenerate with `node fixtures/health-docs/generate.mjs`).
 

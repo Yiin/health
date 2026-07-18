@@ -1,9 +1,16 @@
-// End-to-end tests of the lab_report extracting + normalizing stages through
-// runIngestion: real fixture PDFs through real unpdf text extraction, a mocked
-// Kimi (deterministic, derived from what unpdf actually extracted — see
-// mockKimi), and the real biomarker-results repo against the test database.
+// End-to-end tests of the extracting stage (worker/extract.ts):
+// - lab_report: real fixture PDFs through real unpdf text extraction, a
+//   mocked Kimi (deterministic, derived from what unpdf actually extracted —
+//   see mockKimi), and the real biomarker-results repo, run through
+//   runIngestion together with the normalizing stage.
+// - apple_health_export: routes to the SAX parser, other document types pass
+//   through untouched, and permanent input problems surface as a needs_review
+//   halt payload the stage executor understands.
+// Storage (readBytes/openOriginal) and Kimi are injected, so no MinIO/Kimi is
+// needed; everything runs against the shared health_test database.
 
 import { readFileSync } from "node:fs";
+import { Readable } from "node:stream";
 
 import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -13,8 +20,16 @@ import { setupTestDb, TEST_DATABASE_URL } from "../src/db/test-utils";
 import type { ChatStructuredParams } from "../src/lib/kimi/client";
 import { EN_CBC, LT_LAB } from "../fixtures/health-docs/content.mjs";
 
+import { SMALL_EXPORT_XML } from "./apple-health/fixture";
+import { APPLE_HEALTH_PROGRESS_STAGE } from "./apple-health/index";
 import { createExtractStage, EXTRACT_PROMPT_V1 } from "./extract";
-import { runIngestion, stubStages, type StageRunner } from "./ingestion";
+import {
+  runIngestion,
+  stageHaltOf,
+  stubStages,
+  type StageContext,
+  type StageRunner,
+} from "./ingestion";
 import { createNormalizeStage, NORMALIZE_PROMPT_V1 } from "./normalize";
 
 setupTestDb();
@@ -566,4 +581,100 @@ describe("lab pipeline — extraction failure paths", () => {
       });
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// Dispatcher tests: apple_health_export routes to the SAX parser, unhandled
+// document types pass through untouched, and permanent input problems surface
+// as a needs_review halt payload the stage executor understands. Storage is
+// injected (openOriginal) so no MinIO is needed.
+// ---------------------------------------------------------------------------
+
+async function insertDocument(
+  documentType: string,
+  s3Key = "originals/ab/cdef/export.xml",
+): Promise<string> {
+  const rows = await sql<{ id: string }[]>`
+    insert into documents (sha256, original_filename, s3_key, document_type)
+    values (${crypto.randomUUID()}, 'export.xml', ${s3Key}, ${documentType})
+    returning id
+  `;
+  return rows[0].id;
+}
+
+function ctxFor(documentId: string): StageContext {
+  return {
+    documentId,
+    sha256: "deadbeef",
+    originalFilename: "export.xml",
+    attempt: 1,
+  };
+}
+
+const SMALL_XML_STREAM = () => Promise.resolve(Readable.from([SMALL_EXPORT_XML]));
+
+describe("createExtractStage", () => {
+  it("parses an apple_health_export document into metrics + workouts", async () => {
+    const id = await insertDocument("apple_health_export");
+    const stage = createExtractStage({ sql, openOriginal: SMALL_XML_STREAM });
+
+    const payload = await stage(ctxFor(id));
+
+    expect(payload).toMatchObject({
+      documentType: "apple_health_export",
+      metrics: 9,
+      workouts: 2,
+    });
+    expect(stageHaltOf(payload)).toBeNull();
+
+    const metrics = await sql<{ count: number }[]>`
+      select count(*)::int as count from daily_metrics where source = 'apple_health'
+    `;
+    expect(metrics[0].count).toBe(9);
+    const workouts = await sql<{ count: number }[]>`
+      select count(*)::int as count from workouts where source = 'apple_health'
+    `;
+    expect(workouts[0].count).toBe(2);
+    const checkpoint = await sql<{ stage: string }[]>`
+      select stage from raw_extractions where document_id = ${id}
+    `;
+    expect(checkpoint.map((r) => r.stage)).toEqual([APPLE_HEALTH_PROGRESS_STAGE]);
+  });
+
+  it("halts needs_review on malformed XML", async () => {
+    const id = await insertDocument("apple_health_export");
+    const stage = createExtractStage({
+      sql,
+      openOriginal: () =>
+        Promise.resolve(Readable.from(["<HealthData><Record</HealthData>"])),
+    });
+
+    const payload = await stage(ctxFor(id));
+    const halt = stageHaltOf(payload);
+    expect(halt?.status).toBe("needs_review");
+    expect(halt?.reason).toMatch(/malformed XML/);
+  });
+
+  it("passes unhandled document types through untouched", async () => {
+    const id = await insertDocument("wearable_export");
+    const stage = createExtractStage({
+      sql,
+      openOriginal: () => {
+        throw new Error("must not be called for non-apple types");
+      },
+    });
+
+    const payload = await stage(ctxFor(id));
+    expect(payload).toEqual({ skipped: true, documentType: "wearable_export" });
+  });
+
+  it("throws when the original is missing from storage (transient)", async () => {
+    const id = await insertDocument("apple_health_export");
+    const stage = createExtractStage({
+      sql,
+      openOriginal: () => Promise.resolve(null),
+    });
+
+    await expect(stage(ctxFor(id))).rejects.toThrow(/missing from storage/);
+  });
 });

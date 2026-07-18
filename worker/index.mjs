@@ -30,9 +30,10 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
 
 /**
  * Production stage runners: the real classifying stage (deterministic
- * sniffing + Kimi fallback, worker/classify.ts) and the real extracting +
- * normalizing stages for lab_report documents (worker/extract.ts,
- * worker/normalize.ts); the rest remain stubs. Built per-worker because the
+ * sniffing + Kimi fallback, worker/classify.ts), the extracting dispatcher
+ * (worker/extract.ts — lab_report and apple_health_export today, more types
+ * landing with their own issues), and the real normalizing stage for
+ * lab_report documents (worker/normalize.ts). Built per-worker because the
  * stages close over the sql pool.
  */
 export function defaultStages(sql) {
