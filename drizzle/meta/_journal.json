@@ -8,6 +8,13 @@
       "when": 1784375187287,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784376975985,
+      "tag": "0001_silent_tigra",
+      "breakpoints": true
     }
   ]
 }
