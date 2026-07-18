@@ -1,9 +1,8 @@
 // End-to-end pipeline test, run INSIDE the compose network by the `e2e`
-// service of docker-compose.e2e.yml (single command — see README "E2E
-// pipeline test"):
+// service of docker-compose.e2e.yml (see README "E2E pipeline test"):
 //
-//   docker compose -p health-e2e -f docker-compose.yml -f docker-compose.e2e.yml \
-//     run --build --rm e2e
+//   npm run e2e         # reuse the last-built web/worker images
+//   npm run e2e:image   # rebuild all service images first (deploy validation)
 //
 // Uploads one fixture of every supported shape through the REAL stack — web
 // upload route → pg-boss → worker stages → Postgres/MinIO — with only the

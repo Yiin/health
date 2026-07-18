@@ -1,8 +1,8 @@
 // Host-run fast e2e: runs the UNCHANGED scripts/e2e-pipeline.mjs against
 // host-spawned web (next dev), worker, and kimi-mock processes, with only the
 // dev compose db and minio as dependencies. Zero image builds — this is the
-// code-change inner loop; `npm run e2e` (docker) stays the deploy validation
-// path.
+// code-change inner loop; `npm run e2e:image` (docker) stays the deploy
+// validation path.
 //
 //   npm run e2e:fast
 //
