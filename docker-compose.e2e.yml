@@ -31,6 +31,8 @@ services:
       # Compress the pg-boss retry backoff (30s doubling in production) so
       # the outage phase exhausts its retries in seconds, not minutes.
       INGEST_RETRY_DELAY_S: "1"
+      # Poll the ingest queue at pg-boss's 0.5s floor (default is 2s).
+      INGEST_POLL_INTERVAL_S: "0.5"
 
   db:
     ports: !reset []

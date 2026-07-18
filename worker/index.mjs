@@ -33,6 +33,21 @@ export const INGEST_QUEUE = "ingest";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
 
+// pg-boss rejects pollingIntervalSeconds below 0.5 (its attorney assertion
+// throws), so env values under the floor clamp up instead of crashing boot.
+const MIN_POLL_INTERVAL_S = 0.5;
+
+/**
+ * Test-only pickup knob: INGEST_POLL_INTERVAL_S tunes how often pg-boss
+ * polls the ingest queue. Unset, non-numeric, or <= 0 → undefined, keeping
+ * pg-boss's default (2s). Production compose never sets it.
+ */
+export function pollIntervalFromEnv(env = process.env) {
+  const parsed = Number(env.INGEST_POLL_INTERVAL_S);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.max(parsed, MIN_POLL_INTERVAL_S);
+}
+
 /**
  * Stage dispatch by document_type: the takeout_archive stages (fan-out and
  * parent barrier) only apply to that type; every other type falls through
@@ -88,7 +103,7 @@ export async function startWorker(options = {}) {
   const {
     databaseUrl = process.env.DATABASE_URL,
     stages,
-    pollingIntervalSeconds,
+    pollingIntervalSeconds = pollIntervalFromEnv(),
     shutdownTimeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS,
     log = console,
   } = options;
@@ -111,7 +126,15 @@ export async function startWorker(options = {}) {
     {
       // includeMetadata so the handler sees retryCount for attempt counting.
       includeMetadata: true,
-      ...(pollingIntervalSeconds ? { pollingIntervalSeconds } : {}),
+      // Retry jobs are only ever discovered by polling, and notify polling
+      // idles at 30s once a queue has NOTIFY enabled — both knobs must move
+      // together or retries lag behind fresh jobs.
+      ...(pollingIntervalSeconds
+        ? {
+            pollingIntervalSeconds,
+            notifyPollingIntervalSeconds: pollingIntervalSeconds,
+          }
+        : {}),
     },
     // pg-boss v12 always hands the handler an array (batchSize 1 → one job).
     async (jobs) => {

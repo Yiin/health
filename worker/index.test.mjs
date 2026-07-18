@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { setupTestDb, TEST_DATABASE_URL } from "../src/db/test-utils";
 
 import { stubStages } from "./ingestion";
-import { startWorker } from "./index.mjs";
+import { pollIntervalFromEnv, startWorker } from "./index.mjs";
 
 setupTestDb();
 
@@ -55,6 +55,22 @@ async function waitFor(condition, label, timeoutMs = 15_000) {
 }
 
 const sendOptions = { retryLimit: 3, retryDelay: 0 };
+
+describe("pollIntervalFromEnv", () => {
+  it("parses INGEST_POLL_INTERVAL_S, clamping to the pg-boss 0.5s floor", () => {
+    expect(pollIntervalFromEnv({ INGEST_POLL_INTERVAL_S: "0.5" })).toBe(0.5);
+    expect(pollIntervalFromEnv({ INGEST_POLL_INTERVAL_S: "3" })).toBe(3);
+    expect(pollIntervalFromEnv({ INGEST_POLL_INTERVAL_S: "0.2" })).toBe(0.5);
+  });
+
+  it("returns undefined for unset, junk, and non-positive values", () => {
+    expect(pollIntervalFromEnv({})).toBeUndefined();
+    expect(
+      pollIntervalFromEnv({ INGEST_POLL_INTERVAL_S: "junk" }),
+    ).toBeUndefined();
+    expect(pollIntervalFromEnv({ INGEST_POLL_INTERVAL_S: "0" })).toBeUndefined();
+  });
+});
 
 describe("worker (pg-boss loop)", () => {
   it(
