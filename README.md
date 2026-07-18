@@ -34,7 +34,9 @@ server in `.next/standalone`).
 
 Drizzle ORM + Postgres 16, postgres.js driver. Schema lives in
 `src/db/schema.ts`; generated SQL migrations live in `drizzle/` (committed).
-`src/db/index.ts` exports a singleton `db` built from `DATABASE_URL`.
+`src/db/index.ts` exports a lazily-initialized singleton `db` built from
+`DATABASE_URL` (lazy so `next build` can import route modules without a
+database).
 
 - `npm run db:generate` — diff the schema and emit a new migration into `drizzle/`
 - `npm run db:migrate` — apply pending migrations (host-side; uses `DATABASE_URL` from `.env`)
@@ -68,6 +70,22 @@ buffering a whole file in memory.
 
 Per-file cap is **2 GB** (enforced by the upload route). Split Google Takeout
 exports into <=2 GB parts at export time.
+
+## Documents library
+
+`/documents` lists every uploaded file as cards (AI summary, type/provider,
+document date, ingestion status) with a full-text search box (tsvector over
+extracted text + summaries, `ts_headline` snippets) and type/provider filters
+— all server-rendered via query params. `/documents/[id]` shows the full
+summary, biomarkers extracted from the document (once the labs domain lands),
+provenance with a download link (`/api/files/[id]`), a source excerpt, and
+inline-editable metadata.
+
+Metadata edits (type, provider, date) go to `PATCH /api/documents/[id]` and
+are stored in the `metadata_overrides` jsonb column — never in the
+pipeline-extracted columns — so re-running ingestion never clobbers manual
+edits. The UI displays effective values (override wins; an explicit null
+means "cleared") and marks edited documents with an "edited" badge.
 
 ## Basic-auth gate
 
