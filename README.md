@@ -25,7 +25,7 @@ by `src/db/test-utils.ts` (migrations in `beforeAll`, table truncation in
 
 Storage tests read MinIO credentials from `.env` and skip cleanly when it is
 absent. They run against the host-published port (`MINIO_PORT`, default 9000)
-and use a dedicated `health-test-w4` bucket.
+and use a dedicated bucket (`MINIO_TEST_BUCKET`, default `health-test-w4`).
 
 Other scripts: `npm run lint`, `npm run format`, `npm run build` (produces the standalone
 server in `.next/standalone`).
@@ -34,9 +34,9 @@ server in `.next/standalone`).
 
 Drizzle ORM + Postgres 16, postgres.js driver. Schema lives in
 `src/db/schema.ts`; generated SQL migrations live in `drizzle/` (committed).
-`src/db/index.ts` exports a lazily-initialized singleton `db` built from
-`DATABASE_URL` (lazy so `next build` can import route modules without a
-database).
+`src/db/index.ts` lazily builds the singleton from `DATABASE_URL` — import
+the `db` proxy directly, or use `getDb()` / `getSqlClient()` for explicit
+access — so importing route modules never connects at build time.
 
 - `npm run db:generate` — diff the schema and emit a new migration into `drizzle/`
 - `npm run db:migrate` — apply pending migrations (host-side; uses `DATABASE_URL` from `.env`)
@@ -70,6 +70,22 @@ buffering a whole file in memory.
 
 Per-file cap is **2 GB** (enforced by the upload route). Split Google Takeout
 exports into <=2 GB parts at export time.
+
+## Uploads & ingestion
+
+`POST /api/uploads` accepts multipart file(s) — pdf, csv, xml, zip, png, jpg,
+webp, txt, json — and processes each independently: bytes stream through a
+SHA-256 hash into content-addressed storage (never buffered in memory), the
+document row and its `ingest` job commit in one transaction
+(`src/lib/uploads.ts`), and identical bytes short-circuit as duplicates with
+no new job. `POST /api/documents/[id]/retry` resets a failed/needs_review
+document (attempts preserved) and re-enqueues it.
+
+Background jobs use pg-boss on the app Postgres (no Redis): `src/lib/queue.ts`
+holds the shared boss instance used by both the web enqueue path and the
+worker. The `ingest` queue uses the exclusive policy, so the singleton key
+(the file's sha256) suppresses a second job while one is still pending or
+running; jobs retry 3 times with backoff.
 
 ## Documents library
 
@@ -117,6 +133,9 @@ devices.
   otherwise).
 - Leave either unset (the default) and all requests pass through.
 - `/api/health` is exempt so Docker/Coolify healthchecks keep working.
+- `/api/uploads` is exempt from the proxy because a matched proxy buffers the
+  request body (10MB default), truncating multi-GB streams; the route
+  enforces the same check itself.
 
 ## Docker Compose
 
