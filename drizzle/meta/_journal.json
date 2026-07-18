@@ -15,6 +15,13 @@
       "when": 1784376932271,
       "tag": "0001_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784378476049,
+      "tag": "0002_documents_metadata_overrides",
+      "breakpoints": true
     }
   ]
 }
