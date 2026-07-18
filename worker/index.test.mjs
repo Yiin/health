@@ -7,7 +7,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { setupTestDb, TEST_DATABASE_URL } from "../src/db/test-utils";
 
 import { stubStages } from "./ingestion";
-import { pollIntervalFromEnv, startWorker } from "./index.mjs";
+import {
+  pollIntervalFromEnv,
+  startWorker,
+  workerConcurrencyFromEnv,
+} from "./index.mjs";
 
 setupTestDb();
 
@@ -72,6 +76,33 @@ describe("pollIntervalFromEnv", () => {
   });
 });
 
+describe("workerConcurrencyFromEnv", () => {
+  it("parses INGEST_WORKER_CONCURRENCY when it is an integer >= 2", () => {
+    expect(workerConcurrencyFromEnv({ INGEST_WORKER_CONCURRENCY: "4" })).toBe(
+      4,
+    );
+    expect(workerConcurrencyFromEnv({ INGEST_WORKER_CONCURRENCY: "2" })).toBe(
+      2,
+    );
+  });
+
+  it("returns undefined for unset, junk, fractional, and < 2 values", () => {
+    expect(workerConcurrencyFromEnv({})).toBeUndefined();
+    expect(
+      workerConcurrencyFromEnv({ INGEST_WORKER_CONCURRENCY: "1" }),
+    ).toBeUndefined();
+    expect(
+      workerConcurrencyFromEnv({ INGEST_WORKER_CONCURRENCY: "0" }),
+    ).toBeUndefined();
+    expect(
+      workerConcurrencyFromEnv({ INGEST_WORKER_CONCURRENCY: "junk" }),
+    ).toBeUndefined();
+    expect(
+      workerConcurrencyFromEnv({ INGEST_WORKER_CONCURRENCY: "2.5" }),
+    ).toBeUndefined();
+  });
+});
+
 describe("worker (pg-boss loop)", () => {
   it(
     "walks an enqueued document through all stages to done",
@@ -111,6 +142,69 @@ describe("worker (pg-boss loop)", () => {
         ]);
         const job = await worker.boss.getJobById("ingest", jobId);
         expect(job?.state).toBe("completed");
+      } finally {
+        await worker.stop();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    "processes documents in parallel when localConcurrency is 2",
+    async () => {
+      // Barrier stage: the first two documents must BOTH be inside
+      // extracting before either may leave. A single serial worker can
+      // never satisfy that (the first document would block the only
+      // worker), so passing proves two pg-boss workers run concurrently.
+      let inFlight = 0;
+      let release;
+      const bothEntered = new Promise((resolve) => {
+        release = resolve;
+      });
+      const barrierStages = {
+        ...stubStages,
+        extracting: async () => {
+          inFlight += 1;
+          if (inFlight >= 2) release();
+          await bothEntered;
+          return { stub: true };
+        },
+      };
+      const worker = await startWorker({
+        databaseUrl: TEST_DATABASE_URL,
+        stages: barrierStages,
+        pollingIntervalSeconds: 0.5,
+        localConcurrency: 2,
+        log: silentLog,
+      });
+      try {
+        const ids = await Promise.all([
+          insertDocument(),
+          insertDocument(),
+          insertDocument(),
+        ]);
+        for (const id of ids) {
+          await worker.boss.send(
+            "ingest",
+            { documentId: id },
+            { ...sendOptions, singletonKey: `sha-${id}` },
+          );
+        }
+
+        await waitFor(async () => {
+          const rows = await sql`
+            select count(*)::int as n from documents where status = 'done'
+          `;
+          return rows[0].n === ids.length;
+        }, "all documents to reach done");
+
+        for (const id of ids) {
+          expect(await documentRow(id)).toEqual({
+            status: "done",
+            attempts: 1,
+            stage_error: null,
+          });
+        }
       } finally {
         await worker.stop();
       }
