@@ -1,0 +1,72 @@
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-health}
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+      KIMI_MODEL_CHAT: ${KIMI_MODEL_CHAT:-kimi-k2.6}
+
+  worker:
+    build: .
+    command: node worker/index.mjs
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-health}
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+      KIMI_MODEL_CHAT: ${KIMI_MODEL_CHAT:-kimi-k2.6}
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - miniodata:/data
+
+  bucket-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      - minio
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          sleep 1
+        done
+        mc mb --ignore-existing "local/$${S3_BUCKET:-health}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+volumes:
+  pgdata:
+  miniodata:
