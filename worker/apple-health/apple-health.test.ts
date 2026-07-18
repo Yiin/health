@@ -5,10 +5,12 @@
 //
 // DB tests (compose Postgres, worker-specific health_test_w33 database — see
 // worker/wearable/wearable.test.ts for the harness pattern this mirrors):
-// idempotent upserts, the raw_extractions progress checkpoint, needs_review
-// for zip/garbage input, and the two acceptance criteria — a 50 MB synthetic
-// export parsed within a 512 MB heap with exact aggregates, and an
-// interrupted parse resuming without duplicate rows.
+// idempotent upserts, the raw_extractions progress checkpoint, export.zip
+// container walking (row parity with the loose-XML path; unreadable,
+// entry-less and corrupt-member archives resolve to needs_review), and the
+// two acceptance criteria — a 50 MB synthetic export parsed within a 512 MB
+// heap with exact aggregates, and an interrupted parse resuming without
+// duplicate rows.
 
 import { createReadStream } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -22,9 +24,11 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
+import { buildZip } from "../zip-fixture";
 import { SMALL_EXPORT_XML, writeSyntheticExport } from "./fixture";
 import {
   APPLE_HEALTH_PROGRESS_STAGE,
+  EXPORT_XML_ENTRY,
   ingestAppleHealthExport,
   type AppleHealthXmlSource,
 } from "./index";
@@ -47,6 +51,25 @@ function stringSource(filename: string, content: string): AppleHealthXmlSource {
     filename,
     openStream: () => Promise.resolve(Readable.from([content])),
   };
+}
+
+function bufferSource(filename: string, bytes: Buffer): AppleHealthXmlSource {
+  return {
+    filename,
+    openStream: () => Promise.resolve(Readable.from([bytes])),
+  };
+}
+
+/** Apple's real container layout: the export.xml plus its CDA sibling. */
+function buildExportZip(xml: string): Buffer {
+  return buildZip([
+    { name: "apple_health_export", data: Buffer.alloc(0), directory: true },
+    { name: EXPORT_XML_ENTRY, data: Buffer.from(xml) },
+    {
+      name: "apple_health_export/export_cda.xml",
+      data: Buffer.from("<ClinicalDocument/>"),
+    },
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -337,13 +360,73 @@ describe("ingestAppleHealthExport (database)", () => {
     expect(await workoutRows()).toHaveLength(2);
   });
 
-  it("flags a zip container as needs_review without touching the DB", async () => {
+  it("walks export.zip and ingests export.xml exactly like the loose path", async () => {
+    // Ground truth: the loose-XML path on the same content.
+    const loose = await ingestAppleHealthExport(
+      sql,
+      stringSource("export.xml", SMALL_EXPORT_XML),
+    );
+    expect(loose.kind).toBe("ingested");
+    const looseMetrics = await metricRows();
+    const looseWorkouts = await workoutRows();
+    await sql`truncate table daily_metrics, workouts, raw_extractions cascade`;
+
+    const outcome = await ingestAppleHealthExport(
+      sql,
+      bufferSource("export.zip", buildExportZip(SMALL_EXPORT_XML)),
+    );
+    expect(outcome.kind).toBe("ingested");
+    if (outcome.kind !== "ingested") return;
+    expect(outcome.metrics).toBe(9);
+    expect(outcome.workouts).toBe(2);
+    expect(await metricRows()).toEqual(looseMetrics);
+    expect(await workoutRows()).toEqual(looseWorkouts);
+  });
+
+  it("flags an unreadable zip container as needs_review without touching the DB", async () => {
     const zipBytes = "PK\x03\x04" + "0".repeat(100);
     const outcome = await ingestAppleHealthExport(
       sql,
       stringSource("export.zip", zipBytes),
     );
     expect(outcome.kind).toBe("needs_review");
+    if (outcome.kind !== "needs_review") return;
+    expect(outcome.reason).toMatch(/unreadable zip archive/);
+    expect(await metricRows()).toHaveLength(0);
+  });
+
+  it("flags a zip without export.xml as needs_review", async () => {
+    const zip = buildZip([
+      {
+        name: "apple_health_export/export_cda.xml",
+        data: Buffer.from("<ClinicalDocument/>"),
+      },
+    ]);
+    const outcome = await ingestAppleHealthExport(
+      sql,
+      bufferSource("export.zip", zip),
+    );
+    expect(outcome.kind).toBe("needs_review");
+    if (outcome.kind !== "needs_review") return;
+    expect(outcome.reason).toMatch(/no apple_health_export\/export\.xml/);
+    expect(await metricRows()).toHaveLength(0);
+  });
+
+  it("flags a corrupt export.xml zip member as needs_review", async () => {
+    const zip = buildZip([
+      {
+        name: EXPORT_XML_ENTRY,
+        data: Buffer.from(SMALL_EXPORT_XML),
+        rawCompressed: Buffer.from([0x00, 0x11, 0x22, 0x33, 0x44]),
+      },
+    ]);
+    const outcome = await ingestAppleHealthExport(
+      sql,
+      bufferSource("export.zip", zip),
+    );
+    expect(outcome.kind).toBe("needs_review");
+    if (outcome.kind !== "needs_review") return;
+    expect(outcome.reason).toMatch(/corrupt zip entry/);
     expect(await metricRows()).toHaveLength(0);
   });
 
