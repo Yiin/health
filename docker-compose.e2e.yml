@@ -33,6 +33,9 @@ services:
       INGEST_RETRY_DELAY_S: "1"
       # Poll the ingest queue at pg-boss's 0.5s floor (default is 2s).
       INGEST_POLL_INTERVAL_S: "0.5"
+      # Drain the 7-fixture upload burst in parallel instead of one document
+      # per poll tick (pg-boss localConcurrency; see worker/index.mjs).
+      INGEST_WORKER_CONCURRENCY: "4"
 
   db:
     ports: !reset []
