@@ -5,3 +5,34 @@ node_modules
 .beads
 .dolt
 .env*
+
+# Worktrees carry their own multi-GB node_modules; the root pattern above
+# does not match nested paths.
+.worktrees
+**/node_modules
+
+# Fixture payloads are consumed only via runtime :ro volume mounts (kimi-mock
+# + e2e runner) — but the two .mjs modules must stay: next build's type check
+# covers scripts/kimi-smoke.ts and the worker tests, which import them.
+fixtures
+!fixtures/health-docs/content.mjs
+!fixtures/health-docs/generate.mjs
+
+# Docs never feed the build.
+docs
+.github
+README.md
+AGENTS.md
+
+# Build/orchestration files themselves — the daemon reads them client-side.
+Dockerfile
+docker-compose.yml
+docker-compose.e2e.yml
+.dockerignore
+
+# Tooling configs unused by next build.
+.prettierrc
+.prettierignore
+components.json
+eslint.config.mjs
+vitest.config.ts
