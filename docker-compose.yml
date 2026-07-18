@@ -24,7 +24,9 @@ services:
 
   worker:
     build: .
-    command: sh -c "node scripts/migrate.mjs && node worker/index.mjs"
+    # Type stripping loads worker/ingestion.ts from the .mjs entry (default-on
+    # from node 22.18; the flag keeps older 22.x working).
+    command: sh -c "node scripts/migrate.mjs && node --experimental-strip-types worker/index.mjs"
     depends_on:
       db:
         condition: service_healthy
