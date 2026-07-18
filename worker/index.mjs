@@ -18,12 +18,22 @@ import {
   runIngestion,
   stubStages,
 } from "./ingestion.ts";
+import { createClassifyStage } from "./classify.ts";
 
 // Same queue the web enqueue side uses (src/lib/queue.ts); duplicated here
 // because node type stripping cannot resolve that module's import graph.
 export const INGEST_QUEUE = "ingest";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
+
+/**
+ * Production stage runners: the real classifying stage (deterministic
+ * sniffing + Kimi fallback, worker/classify.ts) plus the remaining stubs.
+ * Built per-worker because the classify stage closes over the sql pool.
+ */
+export function defaultStages(sql) {
+  return { ...stubStages, classifying: createClassifyStage({ sql }) };
+}
 
 /**
  * Boots pg-boss + a postgres.js pool and subscribes to the ingest queue.
@@ -34,7 +44,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
 export async function startWorker(options = {}) {
   const {
     databaseUrl = process.env.DATABASE_URL,
-    stages = stubStages,
+    stages,
     pollingIntervalSeconds,
     shutdownTimeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS,
     log = console,
@@ -51,6 +61,7 @@ export async function startWorker(options = {}) {
   await boss.createQueue(INGEST_QUEUE, { policy: "exclusive" });
 
   const sql = postgres(databaseUrl);
+  const stageRunners = stages ?? defaultStages(sql);
 
   await boss.work(
     INGEST_QUEUE,
@@ -71,7 +82,7 @@ export async function startWorker(options = {}) {
           `[worker] ingest ${documentId} — attempt ${attempt}/${MAX_ATTEMPTS} (job ${job.id})`,
         );
         const outcome = await runIngestion(sql, documentId, {
-          stages,
+          stages: stageRunners,
           attempt,
           signal: job.signal,
         });
@@ -82,6 +93,11 @@ export async function startWorker(options = {}) {
           case "failed":
             log.error(
               `[worker] ${documentId} failed at stage "${outcome.stage}" after ${attempt} attempts: ${outcome.message}`,
+            );
+            break;
+          case "halted":
+            log.log(
+              `[worker] ${documentId} halted at stage "${outcome.stage}" → status "${outcome.status}"`,
             );
             break;
           case "skipped":

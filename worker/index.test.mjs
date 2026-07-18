@@ -62,6 +62,7 @@ describe("worker (pg-boss loop)", () => {
     async () => {
       const worker = await startWorker({
         databaseUrl: TEST_DATABASE_URL,
+        stages: stubStages,
         pollingIntervalSeconds: 0.5,
         log: silentLog,
       });
@@ -193,6 +194,7 @@ describe("worker (pg-boss loop)", () => {
 
       const second = await startWorker({
         databaseUrl: TEST_DATABASE_URL,
+        stages: stubStages,
         pollingIntervalSeconds: 0.5,
         log: silentLog,
       });

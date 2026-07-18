@@ -5,14 +5,19 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 # The worker entry lives outside .next, so standalone tracing skips its
-# runtime deps; stage the pg-boss closure (from package-lock.json) for the
-# runner to copy in one layer. Keep in sync when pg-boss/postgres change.
+# runtime deps; stage the worker's module closure (from package-lock.json)
+# for the runner to copy in one layer. Keep in sync when the worker's
+# packages change (pg-boss/postgres, openai + file-type for the classify
+# stage). Scoped names need their parent dir created explicitly.
 RUN mkdir -p /worker-modules \
   && for p in pg-boss cron-parser luxon serialize-error non-error type-fest \
     tagged-tag pg pg-connection-string pg-int8 pg-pool pg-protocol pg-types \
     pgpass postgres-array postgres-bytea postgres-date postgres-interval \
-    split2 xtend; do \
-    cp -r "node_modules/$p" /worker-modules/; \
+    split2 xtend openai \
+    file-type strtok3 token-types uint8array-extras @tokenizer/inflate \
+    @tokenizer/token @borewit/text-codec ieee754 debug ms; do \
+    mkdir -p "/worker-modules/$(dirname "$p")" \
+    && cp -r "node_modules/$p" "/worker-modules/$p"; \
   done
 
 FROM node:22-alpine AS builder
@@ -35,6 +40,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Same image doubles as the worker: docker run ... node worker/index.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/worker ./worker
+# The worker's classify stage imports app modules (../src/lib/...,
+# ../src/db/schema.ts) — node type stripping resolves them from the source
+# tree, so the image needs it too.
+COPY --from=builder --chown=nextjs:nodejs /app/src ./src
 # Migration entrypoint (scripts/migrate.mjs) + SQL files. drizzle-orm and
 # postgres are zero-dependency packages; standalone tracing skips them
 # because no app route imports the db yet, so copy them explicitly.
