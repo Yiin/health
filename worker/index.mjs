@@ -20,6 +20,7 @@ import {
 } from "./ingestion.ts";
 import { createClassifyStage } from "./classify.ts";
 import { createExtractStage } from "./extract.ts";
+import { createNormalizeStage } from "./normalize.ts";
 import {
   createTakeoutBarrierStage,
   createTakeoutExtractStage,
@@ -32,9 +33,9 @@ export const INGEST_QUEUE = "ingest";
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
 
 /**
- * Stage dispatch by document_type: stages that only apply to one type look
- * the document up and fall through to the stub for every other type. (The
- * lab-report extraction stage joins this dispatch when health-etv.16 lands.)
+ * Stage dispatch by document_type: the takeout_archive stages (fan-out and
+ * parent barrier) only apply to that type; every other type falls through
+ * to the fallback runner (which itself dispatches or stubs by type).
  */
 function dispatchByType(sql, handlers, fallback) {
   return async (ctx) => {
@@ -51,9 +52,11 @@ function dispatchByType(sql, handlers, fallback) {
  * sniffing + Kimi fallback, worker/classify.ts), the Takeout fan-out +
  * parent barrier for takeout_archive documents (worker/takeout.ts), the
  * extracting dispatcher for every other type (worker/extract.ts —
- * apple_health_export today, more types landing with their own issues),
- * plus the remaining stub. Built per-worker because the stages close over
- * the sql pool.
+ * lab_report and apple_health_export today, more types landing with their
+ * own issues), and the real normalizing stage for lab_report documents
+ * (worker/normalize.ts — other types fall through to it and get its
+ * skipped-stub). Built per-worker because the stages close over the sql
+ * pool.
  */
 export function defaultStages(sql) {
   return {
@@ -67,7 +70,7 @@ export function defaultStages(sql) {
     normalizing: dispatchByType(
       sql,
       { takeout_archive: createTakeoutBarrierStage({ sql }) },
-      stubStages.normalizing,
+      createNormalizeStage({ sql }),
     ),
   };
 }

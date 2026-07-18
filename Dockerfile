@@ -9,8 +9,9 @@ RUN npm ci
 # for the runner to copy in one layer. Keep in sync when the worker's
 # packages change (pg-boss/postgres, openai + file-type for the classify
 # stage, papaparse for wearable CSVs, sax for the Apple Health XML parser,
-# unzipper + its dep chain for the Takeout fan-out — its fs-extra is nested
-# and rides along with the recursive copy of unzipper itself).
+# unpdf + zod for lab extraction/normalize, unzipper + its dep chain for
+# the Takeout fan-out — its fs-extra is nested and rides along with the
+# recursive copy of unzipper itself).
 # Scoped names need their parent dir created explicitly.
 RUN mkdir -p /worker-modules \
   && for p in pg-boss cron-parser luxon serialize-error non-error type-fest \
@@ -19,6 +20,7 @@ RUN mkdir -p /worker-modules \
     split2 xtend papaparse sax openai \
     file-type strtok3 token-types uint8array-extras @tokenizer/inflate \
     @tokenizer/token @borewit/text-codec ieee754 debug ms \
+    unpdf zod \
     unzipper bluebird duplexer2 graceful-fs node-int64 jsonfile universalify \
     inherits readable-stream core-util-is isarray process-nextick-args \
     safe-buffer string_decoder util-deprecate; do \

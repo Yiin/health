@@ -11,8 +11,10 @@
 // (the Takeout parent barrier; the job resolves without a retry and a child
 // document's terminal transition re-drives the parent).
 //
-// The classifying stage is real (worker/classify.ts); extracting and
-// normalizing remain stubs until their issues land.
+// The classifying stage is real (worker/classify.ts), and the extracting +
+// normalizing stages are real for lab_report documents (worker/extract.ts,
+// worker/normalize.ts); non-lab documents pass through the lab stages as
+// no-ops until their own stages exist.
 //
 // This module runs in the worker container under plain node type stripping
 // (worker/index.mjs imports it directly), so its import graph must stay free
@@ -55,11 +57,17 @@ export type StageRunner = (ctx: StageContext) => Promise<postgres.JSONValue>;
  * Terminal stop a stage can request via its payload: the executor caches the
  * payload (raw_extractions row written as usual), then lands the document in
  * the given terminal status and ends the run WITHOUT touching later stages.
- * Used by the classifying stage for needs_review / ignored outcomes.
+ * Used for needs_review / ignored outcomes (e.g. classifier confidence below
+ * threshold, scanned PDF, extraction failing validation on every model).
+ *
+ * `error`, when present, is recorded into documents.stage_error (with the
+ * halting stage and a timestamp) so the UI can show why the document needs
+ * review; otherwise stage_error is cleared.
  */
 export interface StageHalt {
   status: "needs_review" | "ignored";
   reason?: string;
+  error?: string;
 }
 
 const HALT_STATUSES: ReadonlySet<string> = new Set(["needs_review", "ignored"]);
@@ -87,11 +95,16 @@ export function stageHaltOf(payload: postgres.JSONValue): StageHalt | null {
   }
   const halt = (payload as { halt?: unknown }).halt;
   if (!halt || typeof halt !== "object") return null;
-  const { status, reason } = halt as { status?: unknown; reason?: unknown };
+  const { status, reason, error } = halt as {
+    status?: unknown;
+    reason?: unknown;
+    error?: unknown;
+  };
   if (typeof status !== "string" || !HALT_STATUSES.has(status)) return null;
   return {
     status: status as StageHalt["status"],
     ...(typeof reason === "string" ? { reason } : {}),
+    ...(typeof error === "string" ? { error } : {}),
   };
 }
 
@@ -263,12 +276,23 @@ export async function runIngestion(
         values (${documentId}, ${stage}, ${sql.json(payload ?? null)})
         on conflict (document_id, stage) do nothing
       `;
-      // A stage may end the run in a terminal status (classify's
-      // needs_review / ignored) instead of letting the pipeline proceed.
+      // A stage may end the run in a terminal status (scanned PDF, invalid
+      // extraction on every model, ...) instead of letting the pipeline
+      // proceed; the halt may carry a stage_error message for the UI.
       const halt = stageHaltOf(payload);
       if (halt) {
         await sql`
-          update documents set status = ${halt.status}, stage_error = null
+          update documents
+          set status = ${halt.status},
+              stage_error = ${
+                halt.error
+                  ? sql.json({
+                      stage,
+                      message: halt.error,
+                      at: now().toISOString(),
+                    })
+                  : null
+              }
           where id = ${documentId}
         `;
         await notifyParentOnTerminal(sql, document);
