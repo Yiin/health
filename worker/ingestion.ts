@@ -1,16 +1,18 @@
 // Ingestion stage executor: walks one document through the pipeline
-// classifying → extracting → normalizing → done, RESUMING from persisted
-// state. Each finished stage caches its output in raw_extractions (unique per
-// document+stage), so a retried or restarted job reuses prior stage output
+// classifying → extracting → normalizing → summarizing → done, RESUMING from
+// persisted state. Each finished stage caches its output in raw_extractions
+// (unique per document+stage), so a retried or restarted job reuses prior
+// stage output
 // instead of re-running it, and documents.status tracks the stage currently
 // being attempted, which is what makes a mid-stage crash safe to resume.
 //
 // A stage may also HALT the pipeline in a terminal status (needs_review /
 // ignored) by returning a payload with a `halt` field — see StageHalt.
 //
-// The classifying stage is real (worker/classify.ts), and the extracting +
+// The classifying stage is real (worker/classify.ts), the extracting +
 // normalizing stages are real for lab_report documents (worker/extract.ts,
-// worker/normalize.ts); non-lab documents pass through the lab stages as
+// worker/normalize.ts), and the summarizing stage is real for every document
+// (worker/summarize.ts); non-lab documents pass through the lab stages as
 // no-ops until their own stages exist.
 //
 // This module runs in the worker container under plain node type stripping
@@ -25,6 +27,7 @@ export const INGESTION_STAGES = [
   "classifying",
   "extracting",
   "normalizing",
+  "summarizing",
 ] as const;
 export type IngestionStage = (typeof INGESTION_STAGES)[number];
 
@@ -97,6 +100,7 @@ export const stubStages: Record<IngestionStage, StageRunner> = {
   classifying: async () => ({ stub: true }),
   extracting: async () => ({ stub: true }),
   normalizing: async () => ({ stub: true }),
+  summarizing: async () => ({ stub: true }),
 };
 
 interface DocumentRow {

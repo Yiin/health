@@ -36,13 +36,14 @@ export const DOCUMENT_TYPES = [
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 // The ingestion state machine: uploaded → classifying → extracting →
-// normalizing → done | failed | needs_review | ignored. The worker resumes
-// from the persisted status on retry.
+// normalizing → summarizing → done | failed | needs_review | ignored. The
+// worker resumes from the persisted status on retry.
 export const DOCUMENT_STATUSES = [
   "uploaded",
   "classifying",
   "extracting",
   "normalizing",
+  "summarizing",
   "done",
   "failed",
   "needs_review",
@@ -57,6 +58,7 @@ export const NON_TERMINAL_STATUSES = [
   "classifying",
   "extracting",
   "normalizing",
+  "summarizing",
 ] as const satisfies readonly DocumentStatus[];
 export const TERMINAL_STATUSES = [
   "done",
@@ -134,7 +136,7 @@ export const documents = pgTable(
     ),
     check(
       "documents_status_check",
-      sql`${table.status} in ('uploaded','classifying','extracting','normalizing','done','failed','needs_review','ignored')`,
+      sql`${table.status} in ('uploaded','classifying','extracting','normalizing','summarizing','done','failed','needs_review','ignored')`,
     ),
   ],
 );

@@ -21,6 +21,7 @@ import {
 import { createClassifyStage } from "./classify.ts";
 import { createExtractStage } from "./extract.ts";
 import { createNormalizeStage } from "./normalize.ts";
+import { createSummarizeStage } from "./summarize.ts";
 
 // Same queue the web enqueue side uses (src/lib/queue.ts); duplicated here
 // because node type stripping cannot resolve that module's import graph.
@@ -32,8 +33,9 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
  * Production stage runners: the real classifying stage (deterministic
  * sniffing + Kimi fallback, worker/classify.ts), the extracting dispatcher
  * (worker/extract.ts — lab_report and apple_health_export today, more types
- * landing with their own issues), and the real normalizing stage for
- * lab_report documents (worker/normalize.ts). Built per-worker because the
+ * landing with their own issues), the real normalizing stage for lab_report
+ * documents (worker/normalize.ts), and the summarizing stage (ai_summary +
+ * post-ingestion insight, worker/summarize.ts). Built per-worker because the
  * stages close over the sql pool.
  */
 export function defaultStages(sql) {
@@ -42,6 +44,7 @@ export function defaultStages(sql) {
     classifying: createClassifyStage({ sql }),
     extracting: createExtractStage({ sql }),
     normalizing: createNormalizeStage({ sql }),
+    summarizing: createSummarizeStage({ sql }),
   };
 }
 

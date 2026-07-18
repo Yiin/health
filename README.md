@@ -102,7 +102,8 @@ running; jobs retry 3 times with backoff and expire after 15 min per attempt.
 
 The worker container runs `node --experimental-strip-types worker/index.mjs`
 (same image as web). Each `ingest` job walks its document through
-classifying → extracting → normalizing → done (`worker/ingestion.ts`),
+classifying → extracting → normalizing → summarizing → done
+(`worker/ingestion.ts`),
 resuming from persisted state: every finished stage caches its payload in
 `raw_extractions` (unique per document+stage), so a retried job never
 re-runs a completed stage, and `documents.status` marks the stage in flight.
@@ -150,6 +151,19 @@ persists via `insertResults` (canonical-unit conversion + dedup built in).
 Schemas live in `src/lib/ingest/schemas.ts`, name matching in
 `src/lib/ingest/mapping.ts`; synthetic EN+LT PDF fixtures live in
 `fixtures/health-docs/` (regenerate with `node fixtures/health-docs/generate.mjs`).
+
+The final summarizing stage (`worker/summarize.ts`) runs for every document
+that reaches it: one Kimi call writes the 2-4 sentence `documents.ai_summary`
+(in the document's language or English; text-less exports are summarized from
+a digest of their pipeline payloads) that feeds the library's full-text
+search, replacing the classifier's provisional 1-2 sentence guess. For
+`lab_report` documents it then files ONE `ai_insights` row (kind
+`post_ingestion`, prompt version `INSIGHT_PROMPT_V1`): a second Kimi call
+compares the newly persisted results against history (`getTrend`) and the
+row's `source_refs` point at the document plus its `biomarker_results` rows so
+the UI can link out. An existing insight for the document makes the insert a
+no-op, so a retried stage never doubles it; wearable/activity documents get
+no insight in v1.
 
 ## Documents library
 

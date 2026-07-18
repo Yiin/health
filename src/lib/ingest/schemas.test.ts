@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   BIOMARKER_MAPPING_JSON_SCHEMA,
+  DOCUMENT_SUMMARY_JSON_SCHEMA,
   LAB_EXTRACTION_JSON_SCHEMA,
+  POST_INGESTION_INSIGHT_JSON_SCHEMA,
   labExtractionSchema,
   measuredOnOf,
   parseBiomarkerMapping,
+  parseDocumentSummary,
   parseLabExtraction,
+  parsePostIngestionInsight,
 } from "./schemas";
 
 const VALID_PAYLOAD = {
@@ -133,6 +137,48 @@ describe("parseBiomarkerMapping", () => {
   });
 });
 
+describe("parseDocumentSummary", () => {
+  it("accepts a valid summary", () => {
+    const parsed = parseDocumentSummary(
+      JSON.stringify({ summary: "Blood panel from SYNLAB, 32 analytes." }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.summary).toContain("SYNLAB");
+  });
+
+  it("rejects an empty summary", () => {
+    const parsed = parseDocumentSummary(JSON.stringify({ summary: "" }));
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("summary");
+  });
+
+  it("rejects non-JSON input", () => {
+    const parsed = parseDocumentSummary("{not json");
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toMatch(/^not JSON:/);
+  });
+});
+
+describe("parsePostIngestionInsight", () => {
+  it("accepts a valid title + body", () => {
+    const parsed = parsePostIngestionInsight(
+      JSON.stringify({
+        title: "Ferritin down 40% since October, now in range",
+        body: "Ferritin fell from 120 to 72 µg/L ...",
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("rejects a missing body", () => {
+    const parsed = parsePostIngestionInsight(
+      JSON.stringify({ title: "Only a title" }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("body");
+  });
+});
+
 describe("JSON Schemas (strict structured-output convention)", () => {
   it("lists every extraction property in required", () => {
     const { properties, required } =
@@ -163,5 +209,14 @@ describe("JSON Schemas (strict structured-output convention)", () => {
     const { properties, required } =
       BIOMARKER_MAPPING_JSON_SCHEMA.schema.properties.mappings.items;
     expect([...required].sort()).toEqual(Object.keys(properties).sort());
+  });
+
+  it.each([
+    ["summary", DOCUMENT_SUMMARY_JSON_SCHEMA.schema],
+    ["insight", POST_INGESTION_INSIGHT_JSON_SCHEMA.schema],
+  ] as const)("lists every %s property in required", (_name, schema) => {
+    expect([...schema.required].sort()).toEqual(
+      Object.keys(schema.properties).sort(),
+    );
   });
 });
