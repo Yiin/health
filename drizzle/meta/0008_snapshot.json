@@ -1,6 +1,6 @@
 {
-  "id": "486dcfe6-d336-4f15-978c-2d43c4c57850",
-  "prevId": "97b6bd5d-787c-42ac-a440-0554915b919d",
+  "id": "aa6d49da-c3d0-4fd7-b7c3-a134c0156b27",
+  "prevId": "486dcfe6-d336-4f15-978c-2d43c4c57850",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -584,7 +584,7 @@
         },
         "documents_status_check": {
           "name": "documents_status_check",
-          "value": "\"documents\".\"status\" in ('uploaded','classifying','extracting','normalizing','done','failed','needs_review','ignored')"
+          "value": "\"documents\".\"status\" in ('uploaded','classifying','extracting','normalizing','summarizing','done','failed','needs_review','ignored')"
         }
       },
       "isRLSEnabled": false

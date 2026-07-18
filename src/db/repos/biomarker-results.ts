@@ -3,16 +3,20 @@
 // the drizzle db handle as their first argument — no module-level state, so
 // they work with both the app singleton (src/db/index.ts) and test databases.
 
-import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { convertToCanonical } from "../../lib/units.ts";
 
 import {
+  aiInsights,
   biomarkerResults,
   biomarkers,
+  documents,
+  type AiInsight,
   type Biomarker,
   type BiomarkerResult,
+  type BiomarkerResultOverrides,
   type NewBiomarkerResult,
   type ResultFlag,
 } from "../schema.ts";
@@ -103,11 +107,15 @@ export async function insertResults(
 }
 
 export interface TrendPoint {
+  id: string;
   measuredOn: string;
+  value: number;
+  unit: string;
   valueCanonical: number | null;
   refLow: number | null;
   refHigh: number | null;
   labName: string | null;
+  userOverrides: BiomarkerResultOverrides | null;
 }
 
 /** Ascending measured_on series for one biomarker slug (chart input). */
@@ -122,11 +130,15 @@ export async function getTrend(
 
   const rows = await db
     .select({
+      id: biomarkerResults.id,
       measuredOn: biomarkerResults.measuredOn,
+      value: biomarkerResults.value,
+      unit: biomarkerResults.unit,
       valueCanonical: biomarkerResults.valueCanonical,
       refLow: biomarkerResults.refLow,
       refHigh: biomarkerResults.refHigh,
       labName: biomarkerResults.labName,
+      userOverrides: biomarkerResults.userOverrides,
     })
     .from(biomarkerResults)
     .innerJoin(biomarkers, eq(biomarkerResults.biomarkerId, biomarkers.id))
@@ -166,4 +178,109 @@ export async function listBiomarkersWithLatest(
     biomarker,
     latestResult: latestByBiomarkerId.get(biomarker.id) ?? null,
   }));
+}
+
+/** Single catalog row by slug, or null when the slug is unknown. */
+export async function getBiomarkerBySlug(
+  db: Db,
+  slug: string,
+): Promise<Biomarker | null> {
+  const rows = await db
+    .select()
+    .from(biomarkers)
+    .where(eq(biomarkers.slug, slug))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Single result row by id, or null when it does not exist. */
+export async function getResultById(
+  db: Db,
+  id: string,
+): Promise<BiomarkerResult | null> {
+  const rows = await db
+    .select()
+    .from(biomarkerResults)
+    .where(eq(biomarkerResults.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Every stored result, ascending by measured_on. The labs grid groups these
+ * by biomarker to render sparklines; a personal-labs volume stays small
+ * enough that one unbounded read beats N per-biomarker queries.
+ */
+export async function listAllResults(db: Db): Promise<BiomarkerResult[]> {
+  return db
+    .select()
+    .from(biomarkerResults)
+    .orderBy(asc(biomarkerResults.measuredOn));
+}
+
+export interface ResultWithDocument extends BiomarkerResult {
+  /** Filename of the source lab document, when the result came from one. */
+  documentFilename: string | null;
+}
+
+/**
+ * All draws for one biomarker slug, most recent first, with the source
+ * document's filename joined in (the detail page's draws table).
+ */
+export async function listResultsForBiomarker(
+  db: Db,
+  slug: string,
+): Promise<ResultWithDocument[]> {
+  const rows = await db
+    .select({
+      result: biomarkerResults,
+      documentFilename: documents.originalFilename,
+    })
+    .from(biomarkerResults)
+    .innerJoin(biomarkers, eq(biomarkerResults.biomarkerId, biomarkers.id))
+    .leftJoin(documents, eq(biomarkerResults.documentId, documents.id))
+    .where(eq(biomarkers.slug, slug))
+    .orderBy(desc(biomarkerResults.measuredOn));
+
+  return rows.map((row) => ({
+    ...row.result,
+    documentFilename: row.documentFilename,
+  }));
+}
+
+/**
+ * Merges overrides into the row's user_overrides (existing keys survive;
+ * the extracted value/unit/measured_on columns are never touched). Returns
+ * the updated row, or null when no result with that id exists.
+ */
+export async function updateResultOverrides(
+  db: Db,
+  id: string,
+  overrides: BiomarkerResultOverrides,
+): Promise<BiomarkerResult | null> {
+  const rows = await db
+    .update(biomarkerResults)
+    .set({
+      userOverrides: sql`coalesce(${biomarkerResults.userOverrides}, '{}'::jsonb) || ${JSON.stringify(overrides)}::jsonb`,
+    })
+    .where(eq(biomarkerResults.id, id))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/**
+ * Insights pinned to one biomarker: any source_refs element of the form
+ * { kind: "biomarker", id: "<slug>" } matches. Newest first.
+ */
+export async function listInsightsForBiomarker(
+  db: Db,
+  slug: string,
+): Promise<AiInsight[]> {
+  return db
+    .select()
+    .from(aiInsights)
+    .where(
+      sql`${aiInsights.sourceRefs} @> ${JSON.stringify([{ kind: "biomarker", id: slug }])}::jsonb`,
+    )
+    .orderBy(desc(aiInsights.createdAt));
 }

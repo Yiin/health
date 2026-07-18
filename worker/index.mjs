@@ -22,6 +22,10 @@ import { createClassifyStage } from "./classify.ts";
 import { createExtractStage } from "./extract.ts";
 import { createNormalizeStage } from "./normalize.ts";
 import { createSummarizeStage } from "./summarize.ts";
+import {
+  createTakeoutBarrierStage,
+  createTakeoutExtractStage,
+} from "./takeout.ts";
 
 // Same queue the web enqueue side uses (src/lib/queue.ts); duplicated here
 // because node type stripping cannot resolve that module's import graph.
@@ -30,20 +34,46 @@ export const INGEST_QUEUE = "ingest";
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
 
 /**
+ * Stage dispatch by document_type: the takeout_archive stages (fan-out and
+ * parent barrier) only apply to that type; every other type falls through
+ * to the fallback runner (which itself dispatches or stubs by type).
+ */
+function dispatchByType(sql, handlers, fallback) {
+  return async (ctx) => {
+    const rows = await sql`
+      select document_type from documents where id = ${ctx.documentId}
+    `;
+    const handler = rows[0] ? handlers[rows[0].document_type] : undefined;
+    return (handler ?? fallback)(ctx);
+  };
+}
+
+/**
  * Production stage runners: the real classifying stage (deterministic
- * sniffing + Kimi fallback, worker/classify.ts), the extracting dispatcher
- * (worker/extract.ts — lab_report and apple_health_export today, more types
- * landing with their own issues), the real normalizing stage for lab_report
- * documents (worker/normalize.ts), and the summarizing stage (ai_summary +
- * post-ingestion insight, worker/summarize.ts). Built per-worker because the
- * stages close over the sql pool.
+ * sniffing + Kimi fallback, worker/classify.ts), the Takeout fan-out +
+ * parent barrier for takeout_archive documents (worker/takeout.ts), the
+ * extracting dispatcher for every other type (worker/extract.ts —
+ * lab_report and apple_health_export today, more types landing with their
+ * own issues), the real normalizing stage for lab_report documents
+ * (worker/normalize.ts — other types fall through to it and get its
+ * skipped-stub), and the summarizing stage (ai_summary + post-ingestion
+ * insight, worker/summarize.ts). Built per-worker because the stages close
+ * over the sql pool.
  */
 export function defaultStages(sql) {
   return {
     ...stubStages,
     classifying: createClassifyStage({ sql }),
-    extracting: createExtractStage({ sql }),
-    normalizing: createNormalizeStage({ sql }),
+    extracting: dispatchByType(
+      sql,
+      { takeout_archive: createTakeoutExtractStage({ sql }) },
+      createExtractStage({ sql }),
+    ),
+    normalizing: dispatchByType(
+      sql,
+      { takeout_archive: createTakeoutBarrierStage({ sql }) },
+      createNormalizeStage({ sql }),
+    ),
     summarizing: createSummarizeStage({ sql }),
   };
 }
@@ -111,6 +141,11 @@ export async function startWorker(options = {}) {
           case "halted":
             log.log(
               `[worker] ${documentId} halted at stage "${outcome.stage}" → status "${outcome.status}"`,
+            );
+            break;
+          case "pending":
+            log.log(
+              `[worker] ${documentId} parked at stage "${outcome.stage}": ${outcome.message}`,
             );
             break;
           case "skipped":
