@@ -54,6 +54,17 @@ export interface DocumentStageError {
   at?: string;
 }
 
+// User-supplied edits to pipeline-extracted metadata. Stored separately from
+// the extracted columns so re-running the ingestion pipeline never clobbers
+// a manual edit: the UI reads effective values via effectiveMetadata()
+// (src/lib/document-metadata.ts), overrides first. A key explicitly set to
+// null means "the user cleared this field" (distinct from key absent).
+export interface DocumentMetadataOverrides {
+  documentType?: DocumentType;
+  provider?: string | null;
+  documentDate?: string | null;
+}
+
 export const documents = pgTable(
   "documents",
   {
@@ -78,6 +89,8 @@ export const documents = pgTable(
     }),
     aiSummary: text("ai_summary"),
     extractedText: text("extracted_text"),
+    metadataOverrides:
+      jsonb("metadata_overrides").$type<DocumentMetadataOverrides>(),
     status: text("status")
       .$type<DocumentStatus>()
       .notNull()

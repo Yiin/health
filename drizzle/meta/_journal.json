@@ -22,6 +22,13 @@
       "when": 1784379096077,
       "tag": "0002_silent_tigra",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784380470010,
+      "tag": "0003_documents_metadata_overrides",
+      "breakpoints": true
     }
   ]
 }
