@@ -6,6 +6,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   customType,
   date,
@@ -251,6 +252,81 @@ export const biomarkerResults = pgTable(
 
 export type BiomarkerResult = typeof biomarkerResults.$inferSelect;
 export type NewBiomarkerResult = typeof biomarkerResults.$inferInsert;
+
+export const MESSAGE_ROLES = ["user", "assistant"] as const;
+export type MessageRole = (typeof MESSAGE_ROLES)[number];
+
+/** A source the assistant's answer was built from; rendered as a quote card. */
+export interface ChatCitation {
+  documentId: string;
+  filename: string;
+  quote: string;
+}
+
+/**
+ * The tool-calling rounds of one assistant turn, persisted so the next turn
+ * can replay the full assistant(tool_calls) → tool(result) exchange to Kimi
+ * (thinking models reject multi-turn histories without it).
+ */
+export interface StoredToolRounds {
+  rounds: Array<{
+    reasoningContent?: string;
+    calls: Array<{
+      id: string;
+      name: string;
+      arguments: unknown;
+      /** The tool result content returned to the model (size-capped). */
+      result: string;
+    }>;
+  }>;
+}
+
+export const conversations = pgTable("conversations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull().default("New conversation"),
+  archived: boolean("archived").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type Conversation = typeof conversations.$inferSelect;
+export type NewConversation = typeof conversations.$inferInsert;
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    role: text("role").$type<MessageRole>().notNull(),
+    content: text("content").notNull(),
+    // Assistant rows only: the tool-calling rounds that produced the answer.
+    toolCalls: jsonb("tool_calls").$type<StoredToolRounds>(),
+    // Assistant rows only: sources quoted in the answer.
+    citations: jsonb("citations").$type<ChatCitation[]>(),
+    // Kimi thinking models require echoing reasoning_content back in
+    // multi-turn histories, so it must be persisted per assistant message.
+    reasoningContent: text("reasoning_content"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("messages_conversation_created_idx").on(
+      table.conversationId,
+      table.createdAt,
+    ),
+    check(
+      "messages_role_check",
+      sql`${table.role} in ('user','assistant')`,
+    ),
+  ],
+);
+
+export type Message = typeof messages.$inferSelect;
+export type NewMessage = typeof messages.$inferInsert;
 
 /**
  * One wearable/self-reported metric value for one day from one source
