@@ -8,15 +8,20 @@ RUN npm ci
 # runtime deps; stage the worker's module closure (from package-lock.json)
 # for the runner to copy in one layer. Keep in sync when the worker's
 # packages change (pg-boss/postgres, openai + file-type for the classify
-# stage, papaparse for wearable CSVs). Scoped names need their parent dir
-# created explicitly.
+# stage, papaparse for wearable CSVs, sax for the Apple Health XML parser,
+# unzipper + its dep chain for the Takeout fan-out — its fs-extra is nested
+# and rides along with the recursive copy of unzipper itself).
+# Scoped names need their parent dir created explicitly.
 RUN mkdir -p /worker-modules \
   && for p in pg-boss cron-parser luxon serialize-error non-error type-fest \
     tagged-tag pg pg-connection-string pg-int8 pg-pool pg-protocol pg-types \
     pgpass postgres-array postgres-bytea postgres-date postgres-interval \
-    split2 xtend papaparse openai \
+    split2 xtend papaparse sax openai \
     file-type strtok3 token-types uint8array-extras @tokenizer/inflate \
-    @tokenizer/token @borewit/text-codec ieee754 debug ms; do \
+    @tokenizer/token @borewit/text-codec ieee754 debug ms \
+    unzipper bluebird duplexer2 graceful-fs node-int64 jsonfile universalify \
+    inherits readable-stream core-util-is isarray process-nextick-args \
+    safe-buffer string_decoder util-deprecate; do \
     mkdir -p "/worker-modules/$(dirname "$p")" \
     && cp -r "node_modules/$p" "/worker-modules/$p"; \
   done

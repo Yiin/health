@@ -19,6 +19,7 @@ import {
   stubStages,
 } from "./ingestion.ts";
 import { createClassifyStage } from "./classify.ts";
+import { createExtractStage } from "./extract.ts";
 import {
   createTakeoutBarrierStage,
   createTakeoutExtractStage,
@@ -48,9 +49,11 @@ function dispatchByType(sql, handlers, fallback) {
 /**
  * Production stage runners: the real classifying stage (deterministic
  * sniffing + Kimi fallback, worker/classify.ts), the Takeout fan-out +
- * parent barrier for takeout_archive documents (worker/takeout.ts), plus
- * the remaining stubs. Built per-worker because stages close over the sql
- * pool.
+ * parent barrier for takeout_archive documents (worker/takeout.ts), the
+ * extracting dispatcher for every other type (worker/extract.ts —
+ * apple_health_export today, more types landing with their own issues),
+ * plus the remaining stub. Built per-worker because the stages close over
+ * the sql pool.
  */
 export function defaultStages(sql) {
   return {
@@ -59,7 +62,7 @@ export function defaultStages(sql) {
     extracting: dispatchByType(
       sql,
       { takeout_archive: createTakeoutExtractStage({ sql }) },
-      stubStages.extracting,
+      createExtractStage({ sql }),
     ),
     normalizing: dispatchByType(
       sql,
