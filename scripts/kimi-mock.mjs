@@ -23,6 +23,14 @@ import { createServer } from "node:http";
 
 const PORT = Number(process.env.PORT ?? 9700);
 
+// Lab fixture ground truth (analyte tables of the committed PDF fixtures) —
+// the extraction reply for PDFs is derived from it, exactly like the unit
+// tests' mockKimi, because unpdf flattens the PDF text layer to a single
+// line and the column structure is unrecoverable from the prompt alone.
+const FIXTURES_DIR = process.env.FIXTURES_DIR ?? "/mock/fixtures/health-docs";
+const { EN_CBC, LT_LAB } = await import(`${FIXTURES_DIR}/content.mjs`);
+const LAB_FIXTURES = [EN_CBC, LT_LAB];
+
 /** "ok" | "outage" — toggled by the e2e script via POST /__mock/mode. */
 let mode = "ok";
 
@@ -164,41 +172,77 @@ function referenceFields(ref) {
     referenceLow: Number(low.replace(",", ".")),
     referenceHigh: Number(high?.replace(",", ".")),
   };
-  if (!Number.isFinite(parsed.referenceLow) || !Number.isFinite(parsed.referenceHigh)) {
+  if (
+    !Number.isFinite(parsed.referenceLow) ||
+    !Number.isFinite(parsed.referenceHigh)
+  ) {
     return { ...base, referenceText: ref };
   }
   return { ...base, ...parsed };
 }
 
+function fixtureBiomarker([name, value, unit, ref, flag]) {
+  return {
+    name,
+    value: Number(value.replace(",", ".")),
+    unit,
+    ...referenceFields(ref),
+    flag: flag === "H" ? "high" : flag === "L" ? "low" : null,
+  };
+}
+
 /**
- * Deterministic "extraction": parses the analyte table out of the extracted
- * text in the user message using the fixtures' 2+-space column discipline
- * (name  value  unit  reference  flag) — the same stand-in strategy the unit
- * tests use, so whatever unpdf actually extracted is what comes back.
+ * Deterministic "extraction", two strategies:
+ * 1. Line parsing with the fixtures' 2+-space column discipline
+ *    (name  value  unit  reference  flag) — works for plain-text documents,
+ *    whose newlines survive into the prompt.
+ * 2. Fixture ground truth for the PDF fixtures — unpdf flattens their text
+ *    layer to one newline-less line, so (mirroring the unit tests' mockKimi)
+ *    the reply is the fixture's analytes whose names actually appear in the
+ *    extracted text.
  */
 function labExtractionReply(userContent) {
-  const measuredAt =
-    /(?:Collected|Mėginio data):\s*(\d{4}-\d{2}-\d{2})/.exec(userContent)?.[1] ??
-    "2026-01-01";
-  const labName =
-    /(?:Laboratory|Laboratorija):\s*([^\n]+)/.exec(userContent)?.[1]?.trim() ??
-    "";
   const biomarkers = [];
   for (const line of userContent.split("\n")) {
     const columns = line.trim().split(/\s{2,}/);
     if (columns.length < 3) continue;
     const value = Number(columns[1].replace(",", "."));
     if (!Number.isFinite(value)) continue;
-    const flag = columns[4] === "H" ? "high" : columns[4] === "L" ? "low" : null;
-    biomarkers.push({
-      name: columns[0],
-      value,
-      unit: columns[2],
-      ...referenceFields(columns[3] ?? ""),
-      flag,
-    });
+    biomarkers.push(
+      fixtureBiomarker([
+        columns[0],
+        columns[1],
+        columns[2],
+        columns[3] ?? "",
+        columns[4] ?? "",
+      ]),
+    );
   }
-  return { measuredAt, labName, biomarkers };
+  if (biomarkers.length >= 2) {
+    return {
+      measuredAt:
+        /(?:Collected|Mėginio data):\s*(\d{4}-\d{2}-\d{2})/.exec(
+          userContent,
+        )?.[1] ?? "2026-01-01",
+      labName:
+        /(?:Laboratory|Laboratorija):\s*([^\n]+?)(?:\n|$)/
+          .exec(userContent)?.[1]
+          ?.trim() ?? "",
+      biomarkers,
+    };
+  }
+
+  const fixture = LAB_FIXTURES.find((candidate) =>
+    userContent.includes(candidate.labName),
+  );
+  if (!fixture) return { measuredAt: "2026-01-01", labName: "", biomarkers };
+  return {
+    measuredAt: fixture.measuredOn,
+    labName: fixture.labName,
+    biomarkers: fixture.analytes
+      .filter(([name]) => userContent.includes(name))
+      .map(fixtureBiomarker),
+  };
 }
 
 function biomarkerMappingReply(userContent) {

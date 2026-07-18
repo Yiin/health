@@ -73,14 +73,22 @@ describe("getIngestionHealth", () => {
 
     it("counts pending ingest jobs as queue depth", async () => {
       // startAfter far in the future keeps both jobs in 'created'.
-      await boss.send("ingest", { documentId: "a" }, {
-        singletonKey: "sha-a",
-        startAfter: 3600,
-      });
-      await boss.send("ingest", { documentId: "b" }, {
-        singletonKey: "sha-b",
-        startAfter: 3600,
-      });
+      await boss.send(
+        "ingest",
+        { documentId: "a" },
+        {
+          singletonKey: "sha-a",
+          startAfter: 3600,
+        },
+      );
+      await boss.send(
+        "ingest",
+        { documentId: "b" },
+        {
+          singletonKey: "sha-b",
+          startAfter: 3600,
+        },
+      );
 
       const health = await getIngestionHealth(sql);
       expect(health.queue).toEqual({ queued: 2, active: 0 });

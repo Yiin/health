@@ -23,7 +23,9 @@ export function IngestionHealthStrip() {
       try {
         const response = await fetch("/api/ingestion/health");
         if (!response.ok) return;
-        const data = (await response.json()) as { ok: boolean } & IngestionHealth;
+        const data = (await response.json()) as {
+          ok: boolean;
+        } & IngestionHealth;
         if (!cancelled && data.ok) {
           setHealth({ queue: data.queue, documents: data.documents });
         }

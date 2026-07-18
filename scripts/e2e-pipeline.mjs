@@ -79,12 +79,16 @@ async function uploadFiles(entries) {
   });
   const body = await response.json();
   if (!response.ok) {
-    throw new Error(`[e2e] upload failed ${response.status}: ${JSON.stringify(body)}`);
+    throw new Error(
+      `[e2e] upload failed ${response.status}: ${JSON.stringify(body)}`,
+    );
   }
   const byName = new Map();
   for (const file of body.files) {
     if (!file.ok) {
-      throw new Error(`[e2e] upload of ${file.filename} rejected: ${JSON.stringify(file)}`);
+      throw new Error(
+        `[e2e] upload of ${file.filename} rejected: ${JSON.stringify(file)}`,
+      );
     }
     byName.set(file.filename, file.documentId);
   }
@@ -249,12 +253,30 @@ async function setMockMode(mode) {
 }
 
 async function phaseHappyPath() {
-  console.log("\n[e2e] PHASE 1 — one fixture of each type through the pipeline");
+  console.log(
+    "\n[e2e] PHASE 1 — one fixture of each type through the pipeline",
+  );
   const uploads = await uploadFiles([
-    { filename: "en-cbc.pdf", bytes: fixture("en-cbc.pdf"), contentType: "application/pdf" },
-    { filename: "lt-lab.pdf", bytes: fixture("lt-lab.pdf"), contentType: "application/pdf" },
-    { filename: "scanned.pdf", bytes: fixture("scanned.pdf"), contentType: "application/pdf" },
-    { filename: "wearable-garmin.csv", bytes: fixture("wearable-garmin.csv"), contentType: "text/csv" },
+    {
+      filename: "en-cbc.pdf",
+      bytes: fixture("en-cbc.pdf"),
+      contentType: "application/pdf",
+    },
+    {
+      filename: "lt-lab.pdf",
+      bytes: fixture("lt-lab.pdf"),
+      contentType: "application/pdf",
+    },
+    {
+      filename: "scanned.pdf",
+      bytes: fixture("scanned.pdf"),
+      contentType: "application/pdf",
+    },
+    {
+      filename: "wearable-garmin.csv",
+      bytes: fixture("wearable-garmin.csv"),
+      contentType: "text/csv",
+    },
     {
       filename: "takeout.zip",
       bytes: buildZip([
@@ -262,12 +284,23 @@ async function phaseHappyPath() {
           name: "Takeout/Fit/Daily activity metrics/Daily activity metrics.csv",
           content: GOOGLE_FIT_CSV,
         },
-        { name: "Takeout/Fit/Daily activity metrics/2024-06-01.json", content: "{}" },
+        {
+          name: "Takeout/Fit/Daily activity metrics/2024-06-01.json",
+          content: "{}",
+        },
       ]),
       contentType: "application/zip",
     },
-    { filename: "export.xml", bytes: Buffer.from(APPLE_EXPORT_XML), contentType: "application/xml" },
-    { filename: "unknown.txt", bytes: Buffer.from(UNKNOWN_TXT), contentType: "text/plain" },
+    {
+      filename: "export.xml",
+      bytes: Buffer.from(APPLE_EXPORT_XML),
+      contentType: "application/xml",
+    },
+    {
+      filename: "unknown.txt",
+      bytes: Buffer.from(UNKNOWN_TXT),
+      contentType: "text/plain",
+    },
   ]);
   console.log(`[e2e] uploaded ${uploads.size} fixtures`);
 
@@ -290,38 +323,85 @@ async function phaseHappyPath() {
   {
     const doc = await documentRow(uploads.get("en-cbc.pdf"));
     console.log("[e2e] en-cbc.pdf:");
-    check("status done", doc.status === "done", `got ${doc.status} ${JSON.stringify(doc.stage_error)}`);
-    check("classified lab_report", doc.document_type === "lab_report", doc.document_type);
-    check("provider extracted", doc.provider === "City Central Laboratory", String(doc.provider));
-    check("document date extracted", doc.document_date === "2026-03-14", String(doc.document_date));
-    check("ai summary written", typeof doc.ai_summary === "string" && doc.ai_summary.length > 0);
+    check(
+      "status done",
+      doc.status === "done",
+      `got ${doc.status} ${JSON.stringify(doc.stage_error)}`,
+    );
+    check(
+      "classified lab_report",
+      doc.document_type === "lab_report",
+      doc.document_type,
+    );
+    check(
+      "provider extracted",
+      doc.provider === "City Central Laboratory",
+      String(doc.provider),
+    );
+    check(
+      "document date extracted",
+      doc.document_date === "2026-03-14",
+      String(doc.document_date),
+    );
+    check(
+      "ai summary written",
+      typeof doc.ai_summary === "string" && doc.ai_summary.length > 0,
+    );
     const results = await sql`
       select b.slug, r.value::float8 as value
       from biomarker_results r join biomarkers b on b.id = r.biomarker_id
       where r.document_id = ${doc.id}
     `;
-    check("≥10 biomarker results persisted", results.length >= 10, `got ${results.length}`);
+    check(
+      "≥10 biomarker results persisted",
+      results.length >= 10,
+      `got ${results.length}`,
+    );
     const hemoglobin = results.find((row) => row.slug === "hemoglobin");
-    check("hemoglobin mapped with value 14.2", hemoglobin?.value === 14.2, JSON.stringify(hemoglobin));
+    check(
+      "hemoglobin mapped with value 14.2",
+      hemoglobin?.value === 14.2,
+      JSON.stringify(hemoglobin),
+    );
     const insights = await sql`
       select id from ai_insights where source_refs @> ${sql.json([{ kind: "document", id: doc.id }])}
     `;
-    check("post-ingestion insight filed", insights.length === 1, `got ${insights.length}`);
+    check(
+      "post-ingestion insight filed",
+      insights.length === 1,
+      `got ${insights.length}`,
+    );
   }
 
   // --- LT lab PDF -------------------------------------------------------
   {
     const doc = await documentRow(uploads.get("lt-lab.pdf"));
     console.log("[e2e] lt-lab.pdf:");
-    check("status done", doc.status === "done", `got ${doc.status} ${JSON.stringify(doc.stage_error)}`);
-    check("classified lab_report", doc.document_type === "lab_report", doc.document_type);
-    check("provider extracted", doc.provider === "SYNLAB Lietuva", String(doc.provider));
+    check(
+      "status done",
+      doc.status === "done",
+      `got ${doc.status} ${JSON.stringify(doc.stage_error)}`,
+    );
+    check(
+      "classified lab_report",
+      doc.document_type === "lab_report",
+      doc.document_type,
+    );
+    check(
+      "provider extracted",
+      doc.provider === "SYNLAB Lietuva",
+      String(doc.provider),
+    );
     const results = await sql`
       select b.slug, r.value::float8 as value
       from biomarker_results r join biomarkers b on b.id = r.biomarker_id
       where r.document_id = ${doc.id}
     `;
-    check("≥6 biomarker results persisted", results.length >= 6, `got ${results.length}`);
+    check(
+      "≥6 biomarker results persisted",
+      results.length >= 6,
+      `got ${results.length}`,
+    );
     const hemoglobin = results.find((row) => row.slug === "hemoglobin");
     check(
       "Hemoglobinas mapped via LT alias, decimal comma converted",
@@ -346,44 +426,84 @@ async function phaseHappyPath() {
   {
     const doc = await documentRow(uploads.get("wearable-garmin.csv"));
     console.log("[e2e] wearable-garmin.csv:");
-    check("status done", doc.status === "done", `got ${doc.status} ${JSON.stringify(doc.stage_error)}`);
-    check("classified wearable_export", doc.document_type === "wearable_export", doc.document_type);
+    check(
+      "status done",
+      doc.status === "done",
+      `got ${doc.status} ${JSON.stringify(doc.stage_error)}`,
+    );
+    check(
+      "classified wearable_export",
+      doc.document_type === "wearable_export",
+      doc.document_type,
+    );
     const [steps] = await sql`
       select value::float8 as value from daily_metrics
       where source = 'garmin' and metric = 'steps' and metric_on = '2024-03-01'
     `;
-    check("garmin steps persisted (2024-03-01 = 9234)", steps?.value === 9234, JSON.stringify(steps));
+    check(
+      "garmin steps persisted (2024-03-01 = 9234)",
+      steps?.value === 9234,
+      JSON.stringify(steps),
+    );
     const [restingHr] = await sql`
       select value::float8 as value from daily_metrics
       where source = 'garmin' and metric = 'resting_hr' and metric_on = '2024-03-01'
     `;
-    check("garmin resting HR persisted", restingHr?.value === 51, JSON.stringify(restingHr));
+    check(
+      "garmin resting HR persisted",
+      restingHr?.value === 51,
+      JSON.stringify(restingHr),
+    );
   }
 
   // --- Takeout zip ------------------------------------------------------
   {
     const doc = await documentRow(takeoutId);
     console.log("[e2e] takeout.zip:");
-    check("classified takeout_archive", doc.document_type === "takeout_archive", doc.document_type);
-    check("parent completed after children", doc.status === "done", `got ${doc.status} ${JSON.stringify(doc.stage_error)}`);
+    check(
+      "classified takeout_archive",
+      doc.document_type === "takeout_archive",
+      doc.document_type,
+    );
+    check(
+      "parent completed after children",
+      doc.status === "done",
+      `got ${doc.status} ${JSON.stringify(doc.stage_error)}`,
+    );
     const children = await sql`
       select id, status, original_filename from documents
       where parent_document_id = ${takeoutId}
     `;
-    check("one child document (json sidecar skipped)", children.length === 1, JSON.stringify(children));
-    check("child done", children[0]?.status === "done", JSON.stringify(children[0]));
+    check(
+      "one child document (json sidecar skipped)",
+      children.length === 1,
+      JSON.stringify(children),
+    );
+    check(
+      "child done",
+      children[0]?.status === "done",
+      JSON.stringify(children[0]),
+    );
     const [steps] = await sql`
       select value::float8 as value from daily_metrics
       where source = 'google_fit' and metric = 'steps' and metric_on = '2024-06-01'
     `;
-    check("google fit steps persisted (2024-06-01 = 4871)", steps?.value === 4871, JSON.stringify(steps));
+    check(
+      "google fit steps persisted (2024-06-01 = 4871)",
+      steps?.value === 4871,
+      JSON.stringify(steps),
+    );
   }
 
   // --- Apple Health export.xml -----------------------------------------
   {
     const doc = await documentRow(uploads.get("export.xml"));
     console.log("[e2e] export.xml:");
-    check("status done", doc.status === "done", `got ${doc.status} ${JSON.stringify(doc.stage_error)}`);
+    check(
+      "status done",
+      doc.status === "done",
+      `got ${doc.status} ${JSON.stringify(doc.stage_error)}`,
+    );
     check(
       "classified apple_health_export",
       doc.document_type === "apple_health_export",
@@ -393,11 +513,19 @@ async function phaseHappyPath() {
       select value::float8 as value from daily_metrics
       where source = 'apple_health' and metric = 'steps' and metric_on = '2024-05-01'
     `;
-    check("apple steps summed per day (5000+2500)", steps?.value === 7500, JSON.stringify(steps));
+    check(
+      "apple steps summed per day (5000+2500)",
+      steps?.value === 7500,
+      JSON.stringify(steps),
+    );
     const workouts = await sql`
       select type from workouts where source = 'apple_health'
     `;
-    check("apple workout persisted", workouts.length === 1, JSON.stringify(workouts));
+    check(
+      "apple workout persisted",
+      workouts.length === 1,
+      JSON.stringify(workouts),
+    );
   }
 
   // --- Unknown file -----------------------------------------------------
@@ -405,7 +533,11 @@ async function phaseHappyPath() {
     const doc = await documentRow(uploads.get("unknown.txt"));
     console.log("[e2e] unknown.txt:");
     check("status ignored", doc.status === "ignored", doc.status);
-    check("classified unknown", doc.document_type === "unknown", doc.document_type);
+    check(
+      "classified unknown",
+      doc.document_type === "unknown",
+      doc.document_type,
+    );
   }
 }
 
@@ -414,20 +546,31 @@ async function phaseOutage() {
   await setMockMode("outage");
 
   const uploads = await uploadFiles([
-    { filename: "outage-lab.txt", bytes: Buffer.from(OUTAGE_LAB_TXT), contentType: "text/plain" },
+    {
+      filename: "outage-lab.txt",
+      bytes: Buffer.from(OUTAGE_LAB_TXT),
+      contentType: "text/plain",
+    },
   ]);
   const documentId = uploads.get("outage-lab.txt");
-  console.log(`[e2e] uploaded outage-lab.txt as ${documentId}; waiting for retry exhaustion`);
+  console.log(
+    `[e2e] uploaded outage-lab.txt as ${documentId}; waiting for retry exhaustion`,
+  );
 
   await waitForTerminal([documentId], 300_000);
   {
     const doc = await documentRow(documentId);
     console.log("[e2e] after exhaustion:");
     check("status failed", doc.status === "failed", `got ${doc.status}`);
-    check("stage_error kind outage", doc.stage_error?.kind === "outage", JSON.stringify(doc.stage_error));
+    check(
+      "stage_error kind outage",
+      doc.stage_error?.kind === "outage",
+      JSON.stringify(doc.stage_error),
+    );
     check(
       "outage retries exhausted without burning real attempts",
-      doc.stage_error?.outageRetries >= 5 && doc.stage_error?.errorAttempts === 0,
+      doc.stage_error?.outageRetries >= 5 &&
+        doc.stage_error?.errorAttempts === 0,
       JSON.stringify(doc.stage_error),
     );
     check(
@@ -449,33 +592,60 @@ async function phaseOutage() {
     const health = await response.json();
     console.log("[e2e] /api/ingestion/health:", JSON.stringify(health));
     check("health endpoint ok", response.ok && health.ok === true);
-    check("failed count surfaced", health.documents?.failed >= 1, JSON.stringify(health.documents));
+    check(
+      "failed count surfaced",
+      health.documents?.failed >= 1,
+      JSON.stringify(health.documents),
+    );
     check(
       "needs_review count surfaced (scanned.pdf)",
       health.documents?.needsReview >= 1,
       JSON.stringify(health.documents),
     );
-    check("queue shape present", typeof health.queue?.queued === "number" && typeof health.queue?.active === "number");
+    check(
+      "queue shape present",
+      typeof health.queue?.queued === "number" &&
+        typeof health.queue?.active === "number",
+    );
   }
 
   console.log("[e2e] restoring connectivity and retrying");
   await setMockMode("ok");
-  const retryResponse = await fetch(`${WEB_URL}/api/documents/${documentId}/retry`, {
-    method: "POST",
-  });
-  check("retry endpoint accepted", retryResponse.ok, String(retryResponse.status));
+  const retryResponse = await fetch(
+    `${WEB_URL}/api/documents/${documentId}/retry`,
+    {
+      method: "POST",
+    },
+  );
+  check(
+    "retry endpoint accepted",
+    retryResponse.ok,
+    String(retryResponse.status),
+  );
 
   await waitForTerminal([documentId], 240_000);
   {
     const doc = await documentRow(documentId);
     console.log("[e2e] after recovery:");
-    check("recovered to done", doc.status === "done", `got ${doc.status} ${JSON.stringify(doc.stage_error)}`);
-    check("stage_error cleared", doc.stage_error === null, JSON.stringify(doc.stage_error));
+    check(
+      "recovered to done",
+      doc.status === "done",
+      `got ${doc.status} ${JSON.stringify(doc.stage_error)}`,
+    );
+    check(
+      "stage_error cleared",
+      doc.stage_error === null,
+      JSON.stringify(doc.stage_error),
+    );
     const results = await sql`
       select b.slug from biomarker_results r join biomarkers b on b.id = r.biomarker_id
       where r.document_id = ${documentId}
     `;
-    check("results persisted after recovery", results.length >= 2, `got ${results.length}`);
+    check(
+      "results persisted after recovery",
+      results.length >= 2,
+      `got ${results.length}`,
+    );
   }
 }
 
@@ -485,14 +655,22 @@ async function phaseOutage() {
 
 async function main() {
   console.log("[e2e] waiting for the stack");
-  await waitFor("web /api/health", async () => {
-    const response = await fetch(`${WEB_URL}/api/health`);
-    return response.ok;
-  }, 180_000);
-  await waitFor("kimi-mock", async () => {
-    const response = await fetch(`${KIMI_MOCK_URL}/__mock/mode`);
-    return response.ok;
-  }, 60_000);
+  await waitFor(
+    "web /api/health",
+    async () => {
+      const response = await fetch(`${WEB_URL}/api/health`);
+      return response.ok;
+    },
+    180_000,
+  );
+  await waitFor(
+    "kimi-mock",
+    async () => {
+      const response = await fetch(`${KIMI_MOCK_URL}/__mock/mode`);
+      return response.ok;
+    },
+    60_000,
+  );
   await setMockMode("ok");
 
   // Make re-runs against the same volumes deterministic: the e2e stack is

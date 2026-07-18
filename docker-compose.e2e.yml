@@ -20,6 +20,9 @@ services:
       # The e2e runner talks to the API without credentials.
       BASIC_AUTH_USER: ""
       BASIC_AUTH_PASS: ""
+      # Retry options are set at SEND time, and the web service enqueues the
+      # upload jobs — it needs the compressed backoff too (see worker).
+      INGEST_RETRY_DELAY_S: "1"
 
   worker:
     environment:
@@ -41,8 +44,10 @@ services:
     command: node /mock/scripts/kimi-mock.mjs
     environment:
       PORT: "9700"
+      FIXTURES_DIR: /mock/fixtures/health-docs
     volumes:
       - ./scripts:/mock/scripts:ro
+      - ./fixtures:/mock/fixtures:ro
 
   e2e:
     build: .
