@@ -252,6 +252,18 @@ async function setMockMode(mode) {
   console.log(`[e2e] kimi-mock mode → ${mode}`);
 }
 
+async function setOutageMarkers(markers) {
+  const response = await fetch(`${KIMI_MOCK_URL}/__mock/outage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ markers }),
+  });
+  if (!response.ok) {
+    throw new Error(`[e2e] failed to set outage markers [${markers}]`);
+  }
+  console.log(`[e2e] kimi-mock outage markers → [${markers}]`);
+}
+
 async function phaseHappyPath() {
   console.log(
     "\n[e2e] PHASE 1 — one fixture of each type through the pipeline",
@@ -609,7 +621,7 @@ async function phaseHappyPath() {
 
 async function phaseOutage() {
   console.log("\n[e2e] PHASE 2 — Kimi outage semantics");
-  await setMockMode("outage");
+  await setOutageMarkers(["outage-lab"]);
 
   const uploads = await uploadFiles([
     {
@@ -676,7 +688,7 @@ async function phaseOutage() {
   }
 
   console.log("[e2e] restoring connectivity and retrying");
-  await setMockMode("ok");
+  await setOutageMarkers([]);
   const retryResponse = await fetch(
     `${WEB_URL}/api/documents/${documentId}/retry`,
     {
@@ -738,6 +750,7 @@ async function main() {
     60_000,
   );
   await setMockMode("ok");
+  await setOutageMarkers([]);
 
   // Make re-runs against the same volumes deterministic: the e2e stack is
   // disposable by definition (README says run it under a dedicated compose
