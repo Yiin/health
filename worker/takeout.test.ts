@@ -293,6 +293,7 @@ function takeoutStages(
       scratchRoot,
     }),
     normalizing: createTakeoutBarrierStage({ sql }),
+    summarizing: async () => ({ stub: true }),
   };
 }
 

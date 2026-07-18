@@ -37,6 +37,7 @@ import {
 import {
   deleteFile,
   getExtractedText,
+  isNoTextLayerError,
   uploadForExtract,
 } from "../src/lib/kimi/files.ts";
 import {
@@ -550,7 +551,16 @@ async function defaultExtractFileText(
   bytes: Uint8Array,
   filename: string,
 ): Promise<string | null> {
-  const { fileId } = await uploadForExtract(bytes, filename);
+  let fileId: string;
+  try {
+    ({ fileId } = await uploadForExtract(bytes, filename));
+  } catch (error) {
+    // Scanned/image-only PDFs have no text layer: Moonshot rejects the
+    // file-extract UPLOAD itself (400 "text extract error"). Treat as "no
+    // text" so the classifier falls back to the filename + raw head sample.
+    if (isNoTextLayerError(error)) return null;
+    throw error;
+  }
   try {
     const result = await getExtractedText(fileId);
     return result.kind === "text" ? result.text : null;

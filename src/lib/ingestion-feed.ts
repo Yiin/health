@@ -37,6 +37,7 @@ export const INGESTION_STAGES = [
   "classifying",
   "extracting",
   "normalizing",
+  "summarizing",
   "done",
 ] as const;
 export type IngestionStage = (typeof INGESTION_STAGES)[number];

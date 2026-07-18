@@ -91,6 +91,7 @@ describe("worker (pg-boss loop)", () => {
           "classifying",
           "extracting",
           "normalizing",
+          "summarizing",
         ]);
         const job = await worker.boss.getJobById("ingest", jobId);
         expect(job?.state).toBe("completed");
@@ -212,6 +213,7 @@ describe("worker (pg-boss loop)", () => {
           "classifying",
           "extracting",
           "normalizing",
+          "summarizing",
         ]);
       } finally {
         await second.stop();

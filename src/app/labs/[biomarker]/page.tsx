@@ -16,6 +16,7 @@ import {
   effectiveResult,
   effectiveValueCanonical,
 } from "@/lib/labs";
+import { calloutsForFlags, computeFlags } from "@/lib/flags";
 import { EditedPill, StatusPill } from "@/components/labs/status-pill";
 import { ResultsTable, type DrawRow } from "@/components/labs/results-table";
 import { TrendChart } from "@/components/labs/trend-chart";
@@ -47,6 +48,9 @@ export default async function BiomarkerPage({
     refHigh: point.refHigh,
     labName: point.labName,
   }));
+  // Deterministic flags (out-of-range draws, big deltas, a trend reversal)
+  // become dashed markers on the trend chart.
+  const callouts = calloutsForFlags(computeFlags(chartPoints));
 
   const latest = results[0] ?? null;
   const latestEffective = latest ? effectiveResult(latest) : null;
@@ -99,7 +103,11 @@ export default async function BiomarkerPage({
             No results for this biomarker yet.
           </p>
         ) : (
-          <TrendChart points={chartPoints} unit={catalogEntry.canonicalUnit} />
+          <TrendChart
+            points={chartPoints}
+            unit={catalogEntry.canonicalUnit}
+            callouts={callouts}
+          />
         )}
       </section>
 

@@ -139,7 +139,7 @@ describe("runIngestion", () => {
       stages: countingStages(calls),
     });
     expect(outcome).toEqual({ kind: "done" });
-    expect(calls).toEqual(["extracting", "normalizing"]);
+    expect(calls).toEqual(["extracting", "normalizing", "summarizing"]);
     expect(await documentRow(id)).toEqual({
       status: "done",
       attempts: 2,
@@ -219,7 +219,7 @@ describe("runIngestion", () => {
     });
     expect(outcome).toEqual({ kind: "done" });
     // classifying was cached from the failed run and is not re-executed.
-    expect(calls).toEqual(["extracting", "normalizing"]);
+    expect(calls).toEqual(["extracting", "normalizing", "summarizing"]);
     expect((await documentRow(id)).status).toBe("done");
   });
 
@@ -287,7 +287,7 @@ describe("runIngestion", () => {
     });
     expect(resumed).toEqual({ kind: "done" });
     // classifying was cached from the halted run and is not re-executed.
-    expect(calls).toEqual(["extracting", "normalizing"]);
+    expect(calls).toEqual(["extracting", "normalizing", "summarizing"]);
     expect((await documentRow(id)).status).toBe("done");
   });
 
@@ -329,7 +329,7 @@ describe("runIngestion", () => {
       stages: countingStages(calls),
     });
     expect(second).toEqual({ kind: "done" });
-    expect(calls).toEqual(["normalizing"]);
+    expect(calls).toEqual(["normalizing", "summarizing"]);
   });
 
   it("completes a barrier-parked parent when its last child turns terminal", async () => {

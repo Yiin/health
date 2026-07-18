@@ -12,6 +12,7 @@ import {
   TypeBadge,
 } from "@/components/documents/badges";
 import { EditMetadataForm } from "@/components/documents/edit-metadata-form";
+import { ReprocessButton } from "@/components/documents/reprocess-button";
 import { buttonVariants } from "@/components/ui/button";
 
 // Reads the database per request; never prerendered at build time.
@@ -153,14 +154,19 @@ export default async function DocumentPage({
           <ProvenanceRow label="Original filename">
             <span className="break-all">{document.originalFilename}</span>
           </ProvenanceRow>
-          <ProvenanceRow label="Download">
-            <a
-              href={`/api/files/${document.id}`}
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-            >
-              <Download className="size-3.5" />
-              Original file
-            </a>
+          <ProvenanceRow label="Actions">
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={`/api/files/${document.id}`}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <Download className="size-3.5" />
+                Original file
+              </a>
+              {document.status === "done" && (
+                <ReprocessButton documentId={document.id} />
+              )}
+            </div>
           </ProvenanceRow>
           <ProvenanceRow label="Uploaded">
             {formatTimestamp(document.uploadedAt)}

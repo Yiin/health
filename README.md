@@ -86,6 +86,12 @@ no new job. `POST /api/documents/[id]/retry` resets a failed/needs_review
 document (attempts preserved) and re-enqueues it; an optional JSON body
 `{ "documentType": "…" }` ("Process as…") stores the type hint as a metadata
 override in the same transaction, so the classifier sees it on the re-run.
+`POST /api/documents/[id]/reprocess` is the done-document counterpart: it
+deletes the document's `raw_extractions` stage cache first (so every stage
+re-runs against the current implementation instead of resuming from stale
+cached output — the recovery for documents processed while stages were
+stubs), then resets to `uploaded` and re-enqueues like retry. The detail
+page surfaces it as a Reprocess button next to the download action.
 
 `/upload` is the drop-anything dropzone (drag-drop or click, per-file XHR
 progress) with a live ingestion feed underneath: it polls
@@ -106,7 +112,8 @@ running; jobs retry 3 times with backoff and expire after 15 min per attempt.
 
 The worker container runs `node --experimental-strip-types worker/index.mjs`
 (same image as web). Each `ingest` job walks its document through
-classifying → extracting → normalizing → done (`worker/ingestion.ts`),
+classifying → extracting → normalizing → summarizing → done
+(`worker/ingestion.ts`),
 resuming from persisted state: every finished stage caches its payload in
 `raw_extractions` (unique per document+stage), so a retried job never
 re-runs a completed stage, and `documents.status` marks the stage in flight.
@@ -177,6 +184,29 @@ those extract `{provider, documentDate, summary, keyFindings}` and update
 'scanned' reviews re-extract through vision on retry — and a "Process as…"
 hint additionally drops the classifying cache so the hint is honored.
 
+The final summarizing stage (`worker/summarize.ts`) runs for every document
+that reaches it: one Kimi call writes the 2-4 sentence `documents.ai_summary`
+(in the document's language or English; text-less exports are summarized from
+a digest of their pipeline payloads) that feeds the library's full-text
+search, replacing the classifier's provisional 1-2 sentence guess. For
+`lab_report` documents it then files ONE `ai_insights` row (kind
+`post_ingestion`, prompt version `INSIGHT_PROMPT_V1`): a second Kimi call
+compares the newly persisted results against history (`getTrend`) and the
+row's `source_refs` point at the document plus its `biomarker_results` rows so
+the UI can link out. An existing insight for the document makes the insert a
+no-op, so a retried stage never doubles it; wearable/activity documents get
+no insight in v1.
+
+### Live Kimi smoke eval
+
+`scripts/kimi-smoke.ts` ingests the synthetic samples in
+`fixtures/health-docs/` (LT + EN lab PDFs, wearable CSV, scanned PDF) through
+the real classify/extract/normalize stages against the **live** Kimi API and
+prints classification, extracted records vs ground truth, token cost, and
+latency. Manual runs only (the API costs money); see `docs/kimi-eval.md` for
+the runbook and the 2026-07-18 findings (LT extraction excellent; scanned
+image-only PDFs need the vision fallback; Tier0 queue copes).
+
 ## Documents library
 
 `/documents` lists every uploaded file as cards (AI summary, type/provider,
@@ -210,6 +240,24 @@ citations as jsonb, `reasoning_content` per assistant message — Kimi thinking
 models require it echoed back in multi-turn histories). The sidebar lists
 conversations with title search and archive (`PATCH
 /api/chat/conversations/[id]`).
+
+## Overview, insights & flags
+
+`/` (the overview) is server-rendered from the DB: stat cards for the latest
+key vitals (steps, resting HR, HRV, sleep, weight — newest day per metric via
+`getLatestMetricValues`) plus the biomarker in-range ratio; a "needs
+attention" strip (biomarkers whose latest draw is flagged + failed /
+needs-review documents); the three most recent AI insights; and the five most
+recent uploads. `/insights` shows deterministic flag cards followed by the
+full `ai_insights` feed (kind badge, markdown body, date, and source links
+resolved from `source_refs` — `document` → `/documents/[id]`, `biomarker` →
+`/labs/[slug]`, `biomarker_result` → the slug in its `note`).
+
+The flags come from a deterministic, LLM-free engine (`src/lib/flags.ts`):
+out-of-range vs the draw's reference range, a big delta vs the previous draw
+(25% default, configurable), and a trend reversal (the latest move against an
+established 3+-draw trend). The same flags render as `callouts` on the labs
+detail `TrendChart` — dashed vertical markers at the flagged draws.
 
 ## Basic-auth gate
 
