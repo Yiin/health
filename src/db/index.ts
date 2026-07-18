@@ -1,17 +1,33 @@
-import { drizzle } from "drizzle-orm/postgres-js";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
 import * as schema from "./schema";
 
-const databaseUrl = process.env.DATABASE_URL;
+// Lazy singletons. `next build` imports route modules (and therefore this
+// one) without a DATABASE_URL in the environment, so neither reading the env
+// var nor constructing the client may happen at import time. postgres.js
+// manages a connection pool internally and connects lazily on first query;
+// Node module caching makes every importer share the one pool.
+let client: postgres.Sql | undefined;
 
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL environment variable is not set");
+export function getSqlClient(): postgres.Sql {
+  if (!client) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error("DATABASE_URL environment variable is not set");
+    }
+    client = postgres(databaseUrl);
+  }
+  return client;
 }
 
-// Singleton query client: postgres.js manages a connection pool internally,
-// and Node module caching makes every import of this module share it.
-const client = postgres(databaseUrl);
+export type Db = PostgresJsDatabase<typeof schema>;
 
-export const db = drizzle(client, { schema });
-export type Db = typeof db;
+let database: Db | undefined;
+
+export function getDb(): Db {
+  if (!database) {
+    database = drizzle(getSqlClient(), { schema });
+  }
+  return database;
+}
