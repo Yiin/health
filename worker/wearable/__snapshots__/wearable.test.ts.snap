@@ -1,0 +1,327 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`fixture parsing (snapshots) > parses garmin-udsfile.csv with the garmin plugin 1`] = `
+{
+  "metrics": [
+    {
+      "metric": "steps",
+      "metricOn": "2024-03-01",
+      "source": "garmin",
+      "unit": "count",
+      "value": 9234,
+    },
+    {
+      "metric": "resting_hr",
+      "metricOn": "2024-03-01",
+      "source": "garmin",
+      "unit": "bpm",
+      "value": 51,
+    },
+    {
+      "metric": "steps",
+      "metricOn": "2024-03-02",
+      "source": "garmin",
+      "unit": "count",
+      "value": 12087,
+    },
+    {
+      "metric": "resting_hr",
+      "metricOn": "2024-03-02",
+      "source": "garmin",
+      "unit": "bpm",
+      "value": 50,
+    },
+    {
+      "metric": "steps",
+      "metricOn": "2024-03-03",
+      "source": "garmin",
+      "unit": "count",
+      "value": 4102,
+    },
+    {
+      "metric": "resting_hr",
+      "metricOn": "2024-03-03",
+      "source": "garmin",
+      "unit": "bpm",
+      "value": 52,
+    },
+  ],
+  "workouts": [],
+}
+`;
+
+exports[`fixture parsing (snapshots) > parses google-fit-daily-activity-metrics.csv with the google_fit plugin 1`] = `
+{
+  "metrics": [
+    {
+      "metric": "steps",
+      "metricOn": "2024-03-01",
+      "source": "google_fit",
+      "unit": "count",
+      "value": 4871,
+    },
+    {
+      "metric": "steps",
+      "metricOn": "2024-03-02",
+      "source": "google_fit",
+      "unit": "count",
+      "value": 8123,
+    },
+    {
+      "metric": "steps",
+      "metricOn": "2024-03-03",
+      "source": "google_fit",
+      "unit": "count",
+      "value": 1532,
+    },
+  ],
+  "workouts": [],
+}
+`;
+
+exports[`fixture parsing (snapshots) > parses oura-sleep.csv with the oura plugin 1`] = `
+{
+  "metrics": [
+    {
+      "metric": "sleep_total_min",
+      "metricOn": "2024-03-01",
+      "source": "oura",
+      "unit": "min",
+      "value": 420,
+    },
+    {
+      "metric": "sleep_deep_min",
+      "metricOn": "2024-03-01",
+      "source": "oura",
+      "unit": "min",
+      "value": 90,
+    },
+    {
+      "metric": "sleep_rem_min",
+      "metricOn": "2024-03-01",
+      "source": "oura",
+      "unit": "min",
+      "value": 105,
+    },
+    {
+      "metric": "sleep_light_min",
+      "metricOn": "2024-03-01",
+      "source": "oura",
+      "unit": "min",
+      "value": 238,
+    },
+    {
+      "metric": "hrv_ms",
+      "metricOn": "2024-03-01",
+      "source": "oura",
+      "unit": "ms",
+      "value": 61,
+    },
+    {
+      "metric": "sleep_total_min",
+      "metricOn": "2024-03-02",
+      "source": "oura",
+      "unit": "min",
+      "value": 402,
+    },
+    {
+      "metric": "sleep_deep_min",
+      "metricOn": "2024-03-02",
+      "source": "oura",
+      "unit": "min",
+      "value": 80,
+    },
+    {
+      "metric": "sleep_rem_min",
+      "metricOn": "2024-03-02",
+      "source": "oura",
+      "unit": "min",
+      "value": 96,
+    },
+    {
+      "metric": "sleep_light_min",
+      "metricOn": "2024-03-02",
+      "source": "oura",
+      "unit": "min",
+      "value": 226,
+    },
+    {
+      "metric": "hrv_ms",
+      "metricOn": "2024-03-02",
+      "source": "oura",
+      "unit": "ms",
+      "value": 54,
+    },
+    {
+      "metric": "sleep_total_min",
+      "metricOn": "2024-03-03",
+      "source": "oura",
+      "unit": "min",
+      "value": 462,
+    },
+    {
+      "metric": "sleep_deep_min",
+      "metricOn": "2024-03-03",
+      "source": "oura",
+      "unit": "min",
+      "value": 100,
+    },
+    {
+      "metric": "sleep_rem_min",
+      "metricOn": "2024-03-03",
+      "source": "oura",
+      "unit": "min",
+      "value": 110,
+    },
+    {
+      "metric": "sleep_light_min",
+      "metricOn": "2024-03-03",
+      "source": "oura",
+      "unit": "min",
+      "value": 252,
+    },
+    {
+      "metric": "hrv_ms",
+      "metricOn": "2024-03-03",
+      "source": "oura",
+      "unit": "ms",
+      "value": 68,
+    },
+  ],
+  "workouts": [],
+}
+`;
+
+exports[`fixture parsing (snapshots) > parses whoop-physiological-cycles.csv with the whoop plugin 1`] = `
+{
+  "metrics": [
+    {
+      "metric": "resting_hr",
+      "metricOn": "2024-03-01",
+      "source": "whoop",
+      "unit": "bpm",
+      "value": 52,
+    },
+    {
+      "metric": "hrv_ms",
+      "metricOn": "2024-03-01",
+      "source": "whoop",
+      "unit": "ms",
+      "value": 84,
+    },
+    {
+      "metric": "sleep_total_min",
+      "metricOn": "2024-03-01",
+      "source": "whoop",
+      "unit": "min",
+      "value": 415,
+    },
+    {
+      "metric": "sleep_light_min",
+      "metricOn": "2024-03-01",
+      "source": "whoop",
+      "unit": "min",
+      "value": 221,
+    },
+    {
+      "metric": "sleep_deep_min",
+      "metricOn": "2024-03-01",
+      "source": "whoop",
+      "unit": "min",
+      "value": 98,
+    },
+    {
+      "metric": "sleep_rem_min",
+      "metricOn": "2024-03-01",
+      "source": "whoop",
+      "unit": "min",
+      "value": 96,
+    },
+    {
+      "metric": "resting_hr",
+      "metricOn": "2024-03-02",
+      "source": "whoop",
+      "unit": "bpm",
+      "value": 55,
+    },
+    {
+      "metric": "hrv_ms",
+      "metricOn": "2024-03-02",
+      "source": "whoop",
+      "unit": "ms",
+      "value": 61,
+    },
+    {
+      "metric": "sleep_total_min",
+      "metricOn": "2024-03-02",
+      "source": "whoop",
+      "unit": "min",
+      "value": 382,
+    },
+    {
+      "metric": "sleep_light_min",
+      "metricOn": "2024-03-02",
+      "source": "whoop",
+      "unit": "min",
+      "value": 205,
+    },
+    {
+      "metric": "sleep_deep_min",
+      "metricOn": "2024-03-02",
+      "source": "whoop",
+      "unit": "min",
+      "value": 84,
+    },
+    {
+      "metric": "sleep_rem_min",
+      "metricOn": "2024-03-02",
+      "source": "whoop",
+      "unit": "min",
+      "value": 93,
+    },
+    {
+      "metric": "resting_hr",
+      "metricOn": "2024-03-03",
+      "source": "whoop",
+      "unit": "bpm",
+      "value": 50,
+    },
+    {
+      "metric": "hrv_ms",
+      "metricOn": "2024-03-03",
+      "source": "whoop",
+      "unit": "ms",
+      "value": 92,
+    },
+    {
+      "metric": "sleep_total_min",
+      "metricOn": "2024-03-03",
+      "source": "whoop",
+      "unit": "min",
+      "value": 441,
+    },
+    {
+      "metric": "sleep_light_min",
+      "metricOn": "2024-03-03",
+      "source": "whoop",
+      "unit": "min",
+      "value": 238,
+    },
+    {
+      "metric": "sleep_deep_min",
+      "metricOn": "2024-03-03",
+      "source": "whoop",
+      "unit": "min",
+      "value": 104,
+    },
+    {
+      "metric": "sleep_rem_min",
+      "metricOn": "2024-03-03",
+      "source": "whoop",
+      "unit": "min",
+      "value": 99,
+    },
+  ],
+  "workouts": [],
+}
+`;

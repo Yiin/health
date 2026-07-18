@@ -1,0 +1,4 @@
+day,bedtime_start,bedtime_end,score,average_breath,average_heart_rate,average_hrv,awake_time,deep_sleep_duration,efficiency,latency,light_sleep_duration,period,rem_sleep_duration,restless_periods,time_in_bed,total_sleep_duration,type
+2024-03-01,2024-02-29T23:12:00+02:00,2024-03-01T07:01:00+02:00,82,13.5,58.2,61,2820,5400,84,600,14280,0,6300,12,28140,25200,long_sleep
+2024-03-02,2024-03-01T23:48:00+02:00,2024-03-02T06:55:00+02:00,76,13.9,60.1,54,3600,4800,79,900,13560,0,5760,18,25620,24120,long_sleep
+2024-03-03,2024-03-02T22:55:00+02:00,2024-03-03T06:30:00+02:00,88,13.2,56.4,68,2100,6000,90,420,15120,0,6600,9,27300,27720,long_sleep

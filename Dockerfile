@@ -11,7 +11,7 @@ RUN mkdir -p /worker-modules \
   && for p in pg-boss cron-parser luxon serialize-error non-error type-fest \
     tagged-tag pg pg-connection-string pg-int8 pg-pool pg-protocol pg-types \
     pgpass postgres-array postgres-bytea postgres-date postgres-interval \
-    split2 xtend; do \
+    split2 xtend papaparse; do \
     cp -r "node_modules/$p" /worker-modules/; \
   done
 
