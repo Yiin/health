@@ -41,6 +41,7 @@ Services:
 - Build pack: `dockercompose` — the compose file builds a single image used by both
   `web` (default CMD) and `worker` (command override).
 - Set env vars from `.env.example` in Coolify (POSTGRES_PASSWORD, MINIO_ROOT_USER,
-  MINIO_ROOT_PASSWORD, MOONSHOT_API_KEY, KIMI_MODEL_CHAT, …).
-- Exposure is tailnet-only via host Caddy — no public ports needed beyond `web:3000`,
-  which Caddy proxies. `db`/`minio` publish nothing.
+  MINIO_ROOT_PASSWORD, MOONSHOT_API_KEY, KIMI_MODEL_CHAT, …). On the VPS also set
+  `WEB_PORT=3100` — host port 3000 is already taken by the meals app.
+- Exposure is tailnet-only via host Caddy — `web` publishes on loopback
+  (`127.0.0.1:${WEB_PORT:-3000}`), which Caddy proxies. `db`/`minio` publish nothing.
