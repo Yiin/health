@@ -60,7 +60,8 @@ services:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data
     # Loopback-only publish so host-side integration tests can reach MinIO.
-    # MINIO_PORT=9080 locally if 9000 is taken (e.g. ClickHouse).
+    # REQUIRED on the VPS: MINIO_PORT=9080 — a ClickHouse container owns host
+    # 9000 there; the default makes docker compose up fail on the collision.
     ports:
       - "127.0.0.1:${MINIO_PORT:-9000}:9000"
     environment:
