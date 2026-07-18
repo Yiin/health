@@ -16,19 +16,24 @@ import {
 
 describe("getStorageConfig", () => {
   it("throws a clear error naming every missing var", () => {
-    expect(() => getStorageConfig({})).toThrow(
+    expect(() => getStorageConfig({ NODE_ENV: "test" })).toThrow(
       "Missing required S3 environment variables: S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY",
     );
   });
 
   it("names only the missing vars", () => {
     expect(() =>
-      getStorageConfig({ S3_ENDPOINT: "http://x", S3_BUCKET: "b" }),
+      getStorageConfig({
+        NODE_ENV: "test",
+        S3_ENDPOINT: "http://x",
+        S3_BUCKET: "b",
+      }),
     ).toThrow("S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY");
   });
 
   it("defaults the region to us-east-1", () => {
     const config = getStorageConfig({
+      NODE_ENV: "test",
       S3_ENDPOINT: "http://127.0.0.1:9000",
       S3_BUCKET: "b",
       S3_ACCESS_KEY_ID: "k",

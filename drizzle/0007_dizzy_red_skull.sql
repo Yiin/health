@@ -1,0 +1,1 @@
+ALTER TABLE "biomarker_results" ADD COLUMN "user_overrides" jsonb;
