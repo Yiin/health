@@ -25,6 +25,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Same image doubles as the worker: docker run ... node worker/index.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/worker ./worker
+# Migration entrypoint (scripts/migrate.mjs) + SQL files. drizzle-orm and
+# postgres are zero-dependency packages; standalone tracing skips them
+# because no app route imports the db yet, so copy them explicitly.
+COPY --from=builder /app/drizzle ./drizzle
+COPY --from=builder /app/scripts ./scripts
+COPY --from=deps /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+COPY --from=deps /app/node_modules/postgres ./node_modules/postgres
 
 USER nextjs
 
