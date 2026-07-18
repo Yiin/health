@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { setupMinioTestEnv } from "./minio-test-utils";
 import {
   ensureBucket,
+  getOriginalRange,
   getOriginalStream,
   getStorageConfig,
   objectExists,
@@ -153,5 +154,33 @@ describe.skipIf(!env)("storage against compose MinIO", () => {
     const object = await getOriginalStream(key);
     expect(object!.contentLength).toBe(payload.length);
     await expectRoundTrip(key, payload);
+  });
+
+  it("reads byte ranges: head, middle and suffix, with the total size", async () => {
+    const payload = randomBytes(64 * 1024);
+    const sha256 = createHash("sha256").update(payload).digest("hex");
+    const key = await putOriginal(payload, sha256);
+
+    const head = await getOriginalRange(key, 0, 100);
+    expect(head).not.toBeNull();
+    expect(head!.totalSize).toBe(payload.length);
+    expect(Buffer.from(head!.bytes).equals(payload.subarray(0, 100))).toBe(
+      true,
+    );
+
+    const middle = await getOriginalRange(key, 1000, 2000);
+    expect(
+      Buffer.from(middle!.bytes).equals(payload.subarray(1000, 2000)),
+    ).toBe(true);
+
+    const suffix = await getOriginalRange(key, -500);
+    expect(suffix!.bytes.length).toBe(500);
+    expect(Buffer.from(suffix!.bytes).equals(payload.subarray(-500))).toBe(
+      true,
+    );
+
+    await expect(
+      getOriginalRange(`originals/1999/01/00/${"e".repeat(64)}`, 0, 10),
+    ).resolves.toBeNull();
   });
 });

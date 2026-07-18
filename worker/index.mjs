@@ -18,6 +18,7 @@ import {
   runIngestion,
   stubStages,
 } from "./ingestion.ts";
+import { createClassifyStage } from "./classify.ts";
 import { createExtractStage } from "./extract.ts";
 import { createNormalizeStage } from "./normalize.ts";
 
@@ -28,14 +29,16 @@ export const INGEST_QUEUE = "ingest";
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 60_000;
 
 /**
- * Production stage runners: the real extracting + normalizing stages for
- * lab_report documents (worker/extract.ts, worker/normalize.ts) plus the
- * remaining stubs. Built per-worker because the stages close over the sql
- * pool.
+ * Production stage runners: the real classifying stage (deterministic
+ * sniffing + Kimi fallback, worker/classify.ts) and the real extracting +
+ * normalizing stages for lab_report documents (worker/extract.ts,
+ * worker/normalize.ts); the rest remain stubs. Built per-worker because the
+ * stages close over the sql pool.
  */
 export function defaultStages(sql) {
   return {
     ...stubStages,
+    classifying: createClassifyStage({ sql }),
     extracting: createExtractStage({ sql }),
     normalizing: createNormalizeStage({ sql }),
   };

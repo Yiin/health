@@ -8,9 +8,9 @@
 // A stage may also HALT the pipeline in a terminal status (needs_review /
 // ignored) by returning a payload with a `halt` field — see StageHalt.
 //
-// The extracting + normalizing stages are real for lab_report documents
-// (worker/extract.ts, worker/normalize.ts); classifying is a stub here until
-// its issue lands, and non-lab documents pass through the lab stages as
+// The classifying stage is real (worker/classify.ts), and the extracting +
+// normalizing stages are real for lab_report documents (worker/extract.ts,
+// worker/normalize.ts); non-lab documents pass through the lab stages as
 // no-ops until their own stages exist.
 //
 // This module runs in the worker container under plain node type stripping
