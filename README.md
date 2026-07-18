@@ -108,8 +108,24 @@ resuming from persisted state: every finished stage caches its payload in
 re-runs a completed stage, and `documents.status` marks the stage in flight.
 A stage error records `stage_error {stage, message, at}` and rethrows for
 pg-boss to retry; the final attempt lands the document in `failed` instead.
-Stage implementations are stubs for now. SIGTERM stops fetching and lets the
+A stage may also halt the run in a terminal status (`needs_review`/`ignored`)
+via a `halt` marker on its cached payload. SIGTERM stops fetching and lets the
 active job finish (60s grace, then pg-boss requeues it for the next worker).
+
+The extracting + normalizing stages are implemented for `lab_report`
+documents (`worker/extract.ts`, `worker/normalize.ts`; other types pass
+through as no-ops until their stages land). Extraction reads the text layer
+with unpdf (below ~100 chars the PDF is scanned → `needs_review`, vision path
+pending), then runs Kimi structured output: k2.6 → one retry with the zod
+error appended → escalation to the expert model (k3) on persistent validation
+failure or an implausibly small analyte count; a full sweep of failures lands
+in `needs_review` with `stage_error`. Normalization maps analyte names onto
+the biomarkers catalog (exact alias → fuzzy → batched LLM mapping, with
+confirmed LLM mappings written back into `biomarkers.aliases`) and persists
+via `insertResults` (canonical-unit conversion + dedup built in). Schemas
+live in `src/lib/ingest/schemas.ts`, name matching in
+`src/lib/ingest/mapping.ts`; synthetic EN+LT PDF fixtures live in
+`fixtures/health-docs/` (regenerate with `node fixtures/health-docs/generate.mjs`).
 
 ## Documents library
 

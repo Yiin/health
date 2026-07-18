@@ -208,3 +208,43 @@ export async function getOriginalStream(
     throw err;
   }
 }
+
+/**
+ * Buffer a whole original into memory, or null when the key does not exist.
+ * Only for objects the caller has already size-checked (pipeline stages read
+ * documents.size_bytes first); `maxBytes` is the backstop — an object larger
+ * than the cap makes this throw rather than buffer unboundedly.
+ */
+export async function getOriginalBytes(
+  s3Key: string,
+  maxBytes: number,
+): Promise<Uint8Array | null> {
+  const object = await getOriginalStream(s3Key);
+  if (!object) return null;
+  if (object.contentLength !== undefined && object.contentLength > maxBytes) {
+    object.body.destroy();
+    throw new Error(
+      `original ${s3Key} is ${object.contentLength} bytes, above the ${maxBytes}-byte cap`,
+    );
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of object.body) {
+    const bytes = chunk as Uint8Array;
+    total += bytes.length;
+    if (total > maxBytes) {
+      object.body.destroy();
+      throw new Error(
+        `original ${s3Key} exceeds the ${maxBytes}-byte cap while buffering`,
+      );
+    }
+    chunks.push(bytes);
+  }
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
+}

@@ -6,7 +6,7 @@
 import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { convertToCanonical } from "../../lib/units";
+import { convertToCanonical } from "../../lib/units.ts";
 
 import {
   biomarkerResults,
@@ -15,8 +15,8 @@ import {
   type BiomarkerResult,
   type NewBiomarkerResult,
   type ResultFlag,
-} from "../schema";
-import type * as schema from "../schema";
+} from "../schema.ts";
+import type * as schema from "../schema.ts";
 
 type Db = PostgresJsDatabase<typeof schema>;
 
@@ -96,7 +96,10 @@ export async function insertResults(
     })
     .returning({ id: biomarkerResults.id });
 
-  return { inserted: insertedRows.length, skipped: rows.length - insertedRows.length };
+  return {
+    inserted: insertedRows.length,
+    skipped: rows.length - insertedRows.length,
+  };
 }
 
 export interface TrendPoint {
@@ -154,10 +157,7 @@ export async function listBiomarkersWithLatest(
   const latestRows = await db
     .selectDistinctOn([biomarkerResults.biomarkerId])
     .from(biomarkerResults)
-    .orderBy(
-      biomarkerResults.biomarkerId,
-      desc(biomarkerResults.measuredOn),
-    );
+    .orderBy(biomarkerResults.biomarkerId, desc(biomarkerResults.measuredOn));
   const latestByBiomarkerId = new Map(
     latestRows.map((r) => [r.biomarkerId, r]),
   );

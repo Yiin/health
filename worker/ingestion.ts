@@ -5,9 +5,13 @@
 // instead of re-running it, and documents.status tracks the stage currently
 // being attempted, which is what makes a mid-stage crash safe to resume.
 //
-// Stage implementations are STUBS in this issue — each records a placeholder
-// payload; real classification/extraction/normalization land in later issues
-// and replace entries in `stubStages`.
+// A stage may also HALT the pipeline in a terminal status (needs_review /
+// ignored) by returning a payload with a `halt` field — see StageHalt.
+//
+// The extracting + normalizing stages are real for lab_report documents
+// (worker/extract.ts, worker/normalize.ts); classifying is a stub here until
+// its issue lands, and non-lab documents pass through the lab stages as
+// no-ops until their own stages exist.
 //
 // This module runs in the worker container under plain node type stripping
 // (worker/index.mjs imports it directly), so its import graph must stay free
@@ -47,6 +51,45 @@ export interface StageContext {
 export type StageRunner = (ctx: StageContext) => Promise<postgres.JSONValue>;
 
 /**
+ * Terminal stop a stage can request via its payload: the executor caches the
+ * payload (raw_extractions row written as usual), then lands the document in
+ * the given terminal status and ends the run WITHOUT touching later stages.
+ * Used for needs_review / ignored outcomes (e.g. classifier confidence below
+ * threshold, scanned PDF, extraction failing validation on every model).
+ *
+ * `error`, when present, is recorded into documents.stage_error (with the
+ * halting stage and a timestamp) so the UI can show why the document needs
+ * review; otherwise stage_error is cleared.
+ */
+export interface StageHalt {
+  status: "needs_review" | "ignored";
+  reason?: string;
+  error?: string;
+}
+
+const HALT_STATUSES: ReadonlySet<string> = new Set(["needs_review", "ignored"]);
+
+/** Reads a validated StageHalt off a stage payload's `halt` field, if any. */
+export function stageHaltOf(payload: postgres.JSONValue): StageHalt | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const halt = (payload as { halt?: unknown }).halt;
+  if (!halt || typeof halt !== "object") return null;
+  const { status, reason, error } = halt as {
+    status?: unknown;
+    reason?: unknown;
+    error?: unknown;
+  };
+  if (typeof status !== "string" || !HALT_STATUSES.has(status)) return null;
+  return {
+    status: status as StageHalt["status"],
+    ...(typeof reason === "string" ? { reason } : {}),
+    ...(typeof error === "string" ? { error } : {}),
+  };
+}
+
+/**
  * Placeholder stages. The payload proves the stage ran and is what a resumed
  * job short-circuits on; real implementations replace these one by one.
  */
@@ -66,13 +109,19 @@ interface DocumentRow {
 export type IngestionOutcome =
   | { kind: "done" }
   | { kind: "failed"; stage: IngestionStage; message: string }
+  | { kind: "halted"; stage: IngestionStage; status: string }
   | { kind: "skipped"; status: string }
   | { kind: "missing" };
 
 // Statuses a job must not advance: finished runs, and failed/needs_review
 // documents waiting on the retry endpoint (which resets them to `uploaded`
 // before re-enqueueing).
-const TERMINAL_STATUSES = new Set(["done", "failed", "needs_review", "ignored"]);
+const TERMINAL_STATUSES = new Set([
+  "done",
+  "failed",
+  "needs_review",
+  "ignored",
+]);
 
 export interface RunIngestionOptions {
   stages?: Record<IngestionStage, StageRunner>;
@@ -140,6 +189,27 @@ export async function runIngestion(
         values (${documentId}, ${stage}, ${sql.json(payload ?? null)})
         on conflict (document_id, stage) do nothing
       `;
+      // A stage may end the run in a terminal status (scanned PDF, invalid
+      // extraction on every model, ...) instead of letting the pipeline
+      // proceed; the halt may carry a stage_error message for the UI.
+      const halt = stageHaltOf(payload);
+      if (halt) {
+        await sql`
+          update documents
+          set status = ${halt.status},
+              stage_error = ${
+                halt.error
+                  ? sql.json({
+                      stage,
+                      message: halt.error,
+                      at: now().toISOString(),
+                    })
+                  : null
+              }
+          where id = ${documentId}
+        `;
+        return { kind: "halted", stage, status: halt.status };
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const finalAttempt = attempt >= MAX_ATTEMPTS;
