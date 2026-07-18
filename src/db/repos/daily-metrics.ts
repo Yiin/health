@@ -4,7 +4,7 @@
 // state, so they work with both the app singleton (src/db/index.ts) and test
 // databases.
 
-import { and, asc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { dailyMetrics } from "../schema";
@@ -117,6 +117,36 @@ export interface MetricSourceInfo {
   source: string;
   /** Most recent day this source reported the metric, YYYY-MM-DD. */
   latestOn: string;
+}
+
+export interface LatestMetricValue extends MetricPoint {
+  metric: string;
+}
+
+/**
+ * The freshest value for every stored metric: per metric the newest day wins;
+ * when several sources reported that same day the alphabetically-first source
+ * wins — a deterministic pick (cross-source dedup is out of scope by design;
+ * the UI's source switching lives on the vitals page). The overview's stat
+ * cards read this.
+ */
+export async function getLatestMetricValues(
+  db: Db,
+): Promise<LatestMetricValue[]> {
+  return db
+    .selectDistinctOn([dailyMetrics.metric], {
+      metric: dailyMetrics.metric,
+      metricOn: dailyMetrics.metricOn,
+      value: dailyMetrics.value,
+      unit: dailyMetrics.unit,
+      source: dailyMetrics.source,
+    })
+    .from(dailyMetrics)
+    .orderBy(
+      dailyMetrics.metric,
+      desc(dailyMetrics.metricOn),
+      asc(dailyMetrics.source),
+    );
 }
 
 /**

@@ -14,6 +14,7 @@ import {
   listDocumentBiomarkers,
   listDocumentProviders,
   listDocuments,
+  listDocumentsNeedingAttention,
   registerUpload,
   searchDocuments,
   updateExtraction,
@@ -520,4 +521,50 @@ describe("biomarker_results FK", () => {
       await admin.end();
     }
   }, 60_000);
+});
+
+
+describe("listDocumentsNeedingAttention", () => {
+  test("returns failed and needs_review documents, newest upload first", async () => {
+    await insertDocument({
+      originalFilename: "done.pdf",
+      status: "done",
+      uploadedAt: new Date("2026-01-01T10:00:00Z"),
+    });
+    const failed = await insertDocument({
+      originalFilename: "failed.pdf",
+      status: "failed",
+      uploadedAt: new Date("2026-01-02T10:00:00Z"),
+    });
+    const review = await insertDocument({
+      originalFilename: "review.pdf",
+      status: "needs_review",
+      uploadedAt: new Date("2026-01-03T10:00:00Z"),
+    });
+    await insertDocument({
+      originalFilename: "processing.pdf",
+      status: "extracting",
+      uploadedAt: new Date("2026-01-04T10:00:00Z"),
+    });
+
+    const rows = await listDocumentsNeedingAttention(getDb());
+    expect(rows.map((row) => row.id)).toEqual([review.id, failed.id]);
+    expect(rows[0]).toMatchObject({
+      filename: "review.pdf",
+      status: "needs_review",
+    });
+  });
+
+  test("honors the limit", async () => {
+    await insertDocument({ status: "failed" });
+    await insertDocument({ status: "needs_review" });
+    expect(
+      await listDocumentsNeedingAttention(getDb(), { limit: 1 }),
+    ).toHaveLength(1);
+  });
+
+  test("returns an empty array when nothing needs attention", async () => {
+    await insertDocument({ status: "done" });
+    expect(await listDocumentsNeedingAttention(getDb())).toEqual([]);
+  });
 });
