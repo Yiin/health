@@ -13,11 +13,29 @@ npm run dev
 ## Tests
 
 ```bash
+docker compose up -d minio   # required for the storage integration tests
 npm test
 ```
 
+Storage tests read MinIO credentials from `.env` and skip cleanly when it is
+absent. They run against the host-published port (`MINIO_PORT`, default 9000)
+and use a dedicated `health-test-w4` bucket.
+
 Other scripts: `npm run lint`, `npm run format`, `npm run build` (produces the standalone
 server in `.next/standalone`).
+
+## File storage
+
+Originals live in MinIO (S3) at content-addressed keys
+`originals/<yyyy>/<mm>/<sha256[:2]>/<sha256>` (`src/lib/storage.ts`), so dedup
+is structural: re-uploading identical bytes is a no-op. v1 has **no
+browser-presigned URLs** — MinIO sits on a Docker-internal hostname that
+tailnet browsers cannot reach, so all uploads and downloads proxy through
+Next.js route handlers with streaming (`GET /api/files/[documentId]`), never
+buffering a whole file in memory.
+
+Per-file cap is **2 GB** (enforced by the upload route). Split Google Takeout
+exports into <=2 GB parts at export time.
 
 ## Basic-auth gate
 
@@ -44,7 +62,7 @@ Services:
 - `web` — Next.js standalone server on `http://localhost:3000` (`/api/health` returns `{"ok":true}`)
 - `worker` — same image, `node worker/index.mjs`, no ports
 - `db` — Postgres 16 (internal only, named volume `pgdata`)
-- `minio` — S3-compatible storage (internal only, named volume `miniodata`)
+- `minio` — S3-compatible storage (loopback-only publish on `127.0.0.1:${MINIO_PORT:-9000}` for host-side tests, named volume `miniodata`)
 - `bucket-init` — one-shot job that creates the `S3_BUCKET` bucket
 
 `docker compose down -v` tears everything down including volumes.
@@ -57,4 +75,6 @@ Services:
   MINIO_ROOT_PASSWORD, MOONSHOT_API_KEY, KIMI_MODEL_CHAT, …). On the VPS also set
   `WEB_PORT=3100` — host port 3000 is already taken by the meals app.
 - Exposure is tailnet-only via host Caddy — `web` publishes on loopback
-  (`127.0.0.1:${WEB_PORT:-3000}`), which Caddy proxies. `db`/`minio` publish nothing.
+  (`127.0.0.1:${WEB_PORT:-3000}`), which Caddy proxies. `db` publishes nothing;
+  `minio` publishes loopback-only (`127.0.0.1:${MINIO_PORT:-9000}`) so tests can
+  reach it — Caddy never proxies it.
