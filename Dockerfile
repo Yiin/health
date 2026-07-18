@@ -4,6 +4,16 @@ FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
+# The worker entry lives outside .next, so standalone tracing skips its
+# runtime deps; stage the pg-boss closure (from package-lock.json) for the
+# runner to copy in one layer. Keep in sync when pg-boss/postgres change.
+RUN mkdir -p /worker-modules \
+  && for p in pg-boss cron-parser luxon serialize-error non-error type-fest \
+    tagged-tag pg pg-connection-string pg-int8 pg-pool pg-protocol pg-types \
+    pgpass postgres-array postgres-bytea postgres-date postgres-interval \
+    split2 xtend; do \
+    cp -r "node_modules/$p" /worker-modules/; \
+  done
 
 FROM node:22-alpine AS builder
 WORKDIR /app
@@ -32,6 +42,8 @@ COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/scripts ./scripts
 COPY --from=deps /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=deps /app/node_modules/postgres ./node_modules/postgres
+# Worker queue deps (staged in the deps stage; see comment there).
+COPY --from=deps /worker-modules/ ./node_modules/
 
 USER nextjs
 

@@ -43,6 +43,13 @@
       "when": 1784383501243,
       "tag": "0005_spotty_zaran",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784386271670,
+      "tag": "0006_raw_extractions",
+      "breakpoints": true
     }
   ]
 }
