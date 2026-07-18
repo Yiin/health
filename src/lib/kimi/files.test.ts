@@ -142,6 +142,20 @@ describe("getExtractedText", () => {
     });
   });
 
+  it("treats a 400 text-extract error (scanned PDF, no text layer) as kind=empty", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { error: { message: "text extract error: 没有解析出内容" } },
+        400,
+      ),
+    );
+
+    await expect(getExtractedText("file-123")).resolves.toEqual({
+      kind: "empty",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back to treating a non-JSON body as plain text", async () => {
     fetchMock.mockResolvedValueOnce(new Response("raw text", { status: 200 }));
 
