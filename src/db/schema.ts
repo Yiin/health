@@ -255,6 +255,21 @@ export const RESULT_FLAGS = ["low", "normal", "high"] as const;
 export type ResultFlag = (typeof RESULT_FLAGS)[number];
 
 /**
+ * User-supplied edits to a pipeline-extracted result. Stored separately from
+ * the extracted columns so re-ingesting the source document never clobbers a
+ * manual edit: the UI reads effective values via effectiveResult()
+ * (src/lib/labs.ts), overrides first. Absent keys mean "not edited".
+ */
+export interface BiomarkerResultOverrides {
+  /** As-reported numeric value. */
+  value?: number;
+  /** ISO date string, YYYY-MM-DD. */
+  measuredOn?: string;
+  /** As-reported unit string. */
+  unit?: string;
+}
+
+/**
  * One measured biomarker value, as reported by a lab document.
  * `value`/`unit` keep the as-reported pair; `value_canonical` is the same
  * measurement expressed in biomarkers.canonical_unit (null when no conversion
@@ -281,6 +296,7 @@ export const biomarkerResults = pgTable(
     documentId: uuid("document_id").references(() => documents.id, {
       onDelete: "set null",
     }),
+    userOverrides: jsonb("user_overrides").$type<BiomarkerResultOverrides>(),
   },
   (table) => [
     uniqueIndex("biomarker_results_biomarker_date_value_unique").on(
@@ -367,10 +383,7 @@ export const messages = pgTable(
       table.conversationId,
       table.createdAt,
     ),
-    check(
-      "messages_role_check",
-      sql`${table.role} in ('user','assistant')`,
-    ),
+    check("messages_role_check", sql`${table.role} in ('user','assistant')`),
   ],
 );
 
