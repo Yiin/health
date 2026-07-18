@@ -87,6 +87,24 @@ pipeline-extracted columns — so re-running ingestion never clobbers manual
 edits. The UI displays effective values (override wins; an explicit null
 means "cleared") and marks edited documents with an "edited" badge.
 
+## AI chat
+
+`/chat` is a conversational interface over the user's own data. `POST
+/api/chat` runs one turn: Kimi (kimi-k2.6) with OpenAI-compatible tool
+calling — `search_documents`, `get_biomarker_trend`, `get_daily_metrics`,
+`get_document` (`src/lib/chat/tools.ts`) — and streams progress as SSE events
+(`conversation` → `tool` → `citations` → `delta` chunks → `done`). The system
+prompt restricts answers to health questions and requires grounding in tool
+results; the UI renders each cited source as a quoted passage linking to
+`/documents/[id]` (the trust pattern: the quote is what the answer was built
+from).
+
+Conversations persist in `conversations` + `messages` (tool rounds and
+citations as jsonb, `reasoning_content` per assistant message — Kimi thinking
+models require it echoed back in multi-turn histories). The sidebar lists
+conversations with title search and archive (`PATCH
+/api/chat/conversations/[id]`).
+
 ## Basic-auth gate
 
 The app sits behind a drive-by HTTP basic-auth gate (`src/proxy.ts`).
