@@ -7,8 +7,9 @@
 // Uploads one fixture of every supported shape through the REAL stack — web
 // upload route → pg-boss → worker stages → Postgres/MinIO — with only the
 // Moonshot API replaced by the deterministic kimi-mock service, then asserts
-// the final database state per document. A second phase flips the mock into
-// outage mode and proves the retry semantics: outage-classed failures retry
+// the final database state per document. A second phase, run concurrently
+// with the first, marks its own fixture for outage in the mock and proves
+// the retry semantics: outage-classed failures retry
 // with backoff without consuming real ingestion attempts, exhaustion lands in
 // `failed` with an actionable stage_error, and restoring connectivity + the
 // retry endpoint completes the ingestion.
@@ -36,13 +37,41 @@ const sql = postgres(DATABASE_URL, { max: 2 });
 // ---------------------------------------------------------------------------
 
 let failures = 0;
-function check(label, condition, detail = "") {
-  if (condition) {
-    console.log(`  ✓ ${label}`);
-  } else {
-    failures += 1;
-    console.error(`  ✗ ${label}${detail ? ` — ${detail}` : ""}`);
-  }
+
+/**
+ * Buffered per-phase logger: the two phases run concurrently, so writing to
+ * the console directly would interleave their output beyond attribution.
+ * `check` prints the same ✓/✗ lines and increments the same global
+ * `failures` counter as the old direct-console helper — only the transport
+ * changes: lines buffer until the phase settles, then flush as one block
+ * under the phase's header.
+ */
+function phaseLog(prefix) {
+  const buffered = [];
+  return {
+    log(line) {
+      buffered.push({ error: false, line });
+    },
+    check(label, condition, detail = "") {
+      if (condition) {
+        buffered.push({ error: false, line: `  ✓ ${label}` });
+      } else {
+        failures += 1;
+        buffered.push({
+          error: true,
+          line: `  ✗ ${label}${detail ? ` — ${detail}` : ""}`,
+        });
+      }
+    },
+    flush() {
+      if (buffered.length === 0) return;
+      console.log(`\n[e2e] ${prefix}`);
+      for (const { error, line } of buffered) {
+        (error ? console.error : console.log)(line);
+      }
+      buffered.length = 0;
+    },
+  };
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -263,10 +292,7 @@ async function setOutageMarkers(markers) {
   console.log(`[e2e] kimi-mock outage markers → [${markers}]`);
 }
 
-async function phaseHappyPath() {
-  console.log(
-    "\n[e2e] PHASE 1 — one fixture of each type through the pipeline",
-  );
+async function phaseHappyPath({ log, check }) {
   const uploads = await uploadFiles([
     {
       filename: "en-cbc.pdf",
@@ -313,7 +339,7 @@ async function phaseHappyPath() {
       contentType: "text/plain",
     },
   ]);
-  console.log(`[e2e] uploaded ${uploads.size} fixtures`);
+  log(`[e2e] uploaded ${uploads.size} fixtures`);
 
   await waitForTerminal([...uploads.values()], 240_000);
   // The takeout parent completes only after its children do; wait for those
@@ -333,7 +359,7 @@ async function phaseHappyPath() {
   // --- EN lab PDF -------------------------------------------------------
   {
     const doc = await documentRow(uploads.get("en-cbc.pdf"));
-    console.log("[e2e] en-cbc.pdf:");
+    log("[e2e] en-cbc.pdf:");
     check(
       "status done",
       doc.status === "done",
@@ -387,7 +413,7 @@ async function phaseHappyPath() {
   // --- LT lab PDF -------------------------------------------------------
   {
     const doc = await documentRow(uploads.get("lt-lab.pdf"));
-    console.log("[e2e] lt-lab.pdf:");
+    log("[e2e] lt-lab.pdf:");
     check(
       "status done",
       doc.status === "done",
@@ -427,7 +453,7 @@ async function phaseHappyPath() {
   // document parks in needs_review for a human.
   {
     const doc = await documentRow(uploads.get("scanned.pdf"));
-    console.log("[e2e] scanned.pdf:");
+    log("[e2e] scanned.pdf:");
     check("status needs_review", doc.status === "needs_review", doc.status);
     check(
       "stage_error explains the empty scan",
@@ -439,7 +465,7 @@ async function phaseHappyPath() {
   // --- Wearable CSV -----------------------------------------------------
   {
     const doc = await documentRow(uploads.get("wearable-garmin.csv"));
-    console.log("[e2e] wearable-garmin.csv:");
+    log("[e2e] wearable-garmin.csv:");
     check(
       "status done",
       doc.status === "done",
@@ -473,7 +499,7 @@ async function phaseHappyPath() {
   // --- Takeout zip ------------------------------------------------------
   {
     const doc = await documentRow(takeoutId);
-    console.log("[e2e] takeout.zip:");
+    log("[e2e] takeout.zip:");
     check(
       "classified takeout_archive",
       doc.document_type === "takeout_archive",
@@ -512,7 +538,7 @@ async function phaseHappyPath() {
   // --- Apple Health export.xml -----------------------------------------
   {
     const doc = await documentRow(uploads.get("export.xml"));
-    console.log("[e2e] export.xml:");
+    log("[e2e] export.xml:");
     check(
       "status done",
       doc.status === "done",
@@ -545,7 +571,7 @@ async function phaseHappyPath() {
   // --- Unknown file -----------------------------------------------------
   {
     const doc = await documentRow(uploads.get("unknown.txt"));
-    console.log("[e2e] unknown.txt:");
+    log("[e2e] unknown.txt:");
     check("status ignored", doc.status === "ignored", doc.status);
     check(
       "classified unknown",
@@ -571,7 +597,7 @@ async function phaseHappyPath() {
     const scanId = scanUploads.get("scanned-lab.pdf");
     await waitForTerminal([scanId], 240_000);
     const doc = await documentRow(scanId);
-    console.log("[e2e] scanned-lab.pdf:");
+    log("[e2e] scanned-lab.pdf:");
     check(
       "status done",
       doc.status === "done",
@@ -618,8 +644,7 @@ async function phaseHappyPath() {
   }
 }
 
-async function phaseOutage() {
-  console.log("\n[e2e] PHASE 2 — Kimi outage semantics");
+async function phaseOutage({ log, check }) {
   await setOutageMarkers(["outage-lab"]);
 
   const uploads = await uploadFiles([
@@ -630,14 +655,14 @@ async function phaseOutage() {
     },
   ]);
   const documentId = uploads.get("outage-lab.txt");
-  console.log(
+  log(
     `[e2e] uploaded outage-lab.txt as ${documentId}; waiting for retry exhaustion`,
   );
 
   await waitForTerminal([documentId], 300_000);
   {
     const doc = await documentRow(documentId);
-    console.log("[e2e] after exhaustion:");
+    log("[e2e] after exhaustion:");
     check("status failed", doc.status === "failed", `got ${doc.status}`);
     check(
       "stage_error kind outage",
@@ -663,11 +688,24 @@ async function phaseOutage() {
     );
   }
 
-  // The ingestion health endpoint must surface the failure.
+  // The ingestion health endpoint must surface the failure. Its needs_review
+  // assertion is satisfied by phase 1's scanned.pdf parking in needs_review —
+  // with the phases running concurrently that may not have happened yet, so
+  // wait for it before querying the endpoint.
+  await waitFor(
+    "a needs_review document",
+    async () => {
+      const [{ count }] = await sql`
+        select count(*)::int as count from documents where status = 'needs_review'
+      `;
+      return count >= 1;
+    },
+    240_000,
+  );
   {
     const response = await fetch(`${WEB_URL}/api/ingestion/health`);
     const health = await response.json();
-    console.log("[e2e] /api/ingestion/health:", JSON.stringify(health));
+    log(`[e2e] /api/ingestion/health: ${JSON.stringify(health)}`);
     check("health endpoint ok", response.ok && health.ok === true);
     check(
       "failed count surfaced",
@@ -686,7 +724,7 @@ async function phaseOutage() {
     );
   }
 
-  console.log("[e2e] restoring connectivity and retrying");
+  log("[e2e] restoring connectivity and retrying");
   await setOutageMarkers([]);
   const retryResponse = await fetch(
     `${WEB_URL}/api/documents/${documentId}/retry`,
@@ -703,7 +741,7 @@ async function phaseOutage() {
   await waitForTerminal([documentId], 240_000);
   {
     const doc = await documentRow(documentId);
-    console.log("[e2e] after recovery:");
+    log("[e2e] after recovery:");
     check(
       "recovered to done",
       doc.status === "done",
@@ -774,8 +812,32 @@ async function main() {
     throw new Error(`[e2e] biomarker seed failed with status ${seed.status}`);
   }
 
-  await phaseHappyPath();
-  await phaseOutage();
+  // The phases share nothing but the worker: distinct fixture bytes (no
+  // sha256 singletonKey collisions), per-document outage markers, and
+  // document-scoped assertions let them overlap safely, so total wall-clock
+  // is max(phase1, phase2) instead of their sum. Each phase buffers its
+  // output and flushes it as one block when it settles.
+  console.log("\n[e2e] running PHASE 1 and PHASE 2 concurrently");
+  const phase1 = phaseLog(
+    "PHASE 1 — one fixture of each type through the pipeline",
+  );
+  const phase2 = phaseLog("PHASE 2 — Kimi outage semantics");
+  const settled = await Promise.allSettled([
+    phaseHappyPath(phase1).finally(() => phase1.flush()),
+    phaseOutage(phase2).finally(() => phase2.flush()),
+  ]);
+  const rejections = settled
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason);
+  if (rejections.length > 0) {
+    // Report every crash, then exit through the existing FATAL path with the
+    // first one; the flushed blocks above already show the other phase's
+    // assertion failures.
+    for (const reason of rejections.slice(1)) {
+      console.error("\n[e2e] FATAL:", reason);
+    }
+    throw rejections[0];
+  }
 
   console.log(
     failures === 0
