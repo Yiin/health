@@ -5,6 +5,7 @@ import { setupTestDb } from "../test-utils";
 import {
   getDailySummary,
   getMetricSeries,
+  getMetricSources,
   upsertMetrics,
   type NewMetricRow,
 } from "./daily-metrics";
@@ -157,5 +158,27 @@ describe("getDailySummary", () => {
     const db = getDb();
     await upsertMetrics(db, [row({ metricOn: "2026-01-10" })]);
     expect(await getDailySummary(db, "2026-02-01", "2026-03-01")).toEqual({});
+  });
+});
+
+describe("getMetricSources", () => {
+  it("lists each source once with its most recent day, ordered by name", async () => {
+    const db = getDb();
+    await upsertMetrics(db, [
+      row({ source: "oura", metricOn: "2026-01-10" }),
+      row({ source: "oura", metricOn: "2026-01-12" }),
+      row({ source: "google_fit", metricOn: "2026-01-11" }),
+      // A different metric — must not leak into the result.
+      row({ metric: "resting_hr", source: "garmin", unit: "bpm" }),
+    ]);
+
+    expect(await getMetricSources(db, "steps")).toEqual([
+      { source: "google_fit", latestOn: "2026-01-11" },
+      { source: "oura", latestOn: "2026-01-12" },
+    ]);
+  });
+
+  it("returns an empty array for an unknown metric", async () => {
+    expect(await getMetricSources(getDb(), "no_such_metric")).toEqual([]);
   });
 });
