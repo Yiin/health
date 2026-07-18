@@ -23,6 +23,10 @@ const WEB_URL = process.env.WEB_URL ?? "http://web:3000";
 const KIMI_MOCK_URL = process.env.KIMI_MOCK_URL ?? "http://kimi-mock:9700";
 const DATABASE_URL = process.env.DATABASE_URL;
 const FIXTURES_DIR = process.env.FIXTURES_DIR ?? "/app/fixtures/health-docs";
+// Cadence of every waitFor probe. The probes are single-row selects or HTTP
+// GETs against an otherwise idle stack, so a tight default costs nothing and
+// stops each of the ~7 waits from overshooting its condition by up to 1s.
+const POLL_MS = Number(process.env.E2E_POLL_MS) || 150;
 
 if (!DATABASE_URL) {
   console.error("[e2e] DATABASE_URL is not set");
@@ -59,7 +63,7 @@ async function waitFor(label, probe, timeoutMs) {
     if (Date.now() > deadline) {
       throw new Error(`[e2e] timed out waiting for ${label}`);
     }
-    await sleep(1000);
+    await sleep(POLL_MS);
   }
 }
 

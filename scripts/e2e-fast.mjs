@@ -262,7 +262,7 @@ spawnService("web", "npx", ["next", "dev", "-p", String(WEB_PORT)], {
   ...S3_ENV,
   ...MOONSHOT_ENV,
   // Retry options are set at SEND time by the web process (src/lib/queue.ts).
-  INGEST_RETRY_DELAY_S: "1",
+  INGEST_RETRY_DELAY_S: "0",
   BASIC_AUTH_USER: "",
   BASIC_AUTH_PASS: "",
 });
@@ -275,8 +275,7 @@ spawnService(
     DATABASE_URL: E2E_DB_URL,
     ...S3_ENV,
     ...MOONSHOT_ENV,
-    INGEST_RETRY_DELAY_S: "1",
-    // No-op until the polling-interval knob lands in worker main(); harmless.
+    INGEST_RETRY_DELAY_S: "0",
     INGEST_POLL_INTERVAL_S: "0.5",
   },
 );

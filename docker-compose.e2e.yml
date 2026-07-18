@@ -24,15 +24,16 @@ services:
       BASIC_AUTH_PASS: ""
       # Retry options are set at SEND time, and the web service enqueues the
       # upload jobs — it needs the compressed backoff too (see worker).
-      INGEST_RETRY_DELAY_S: "1"
+      INGEST_RETRY_DELAY_S: "0"
 
   worker:
     environment:
       MOONSHOT_BASE_URL: http://kimi-mock:9700/v1
       MOONSHOT_API_KEY: e2e-mock
-      # Compress the pg-boss retry backoff (30s doubling in production) so
-      # the outage phase exhausts its retries in seconds, not minutes.
-      INGEST_RETRY_DELAY_S: "1"
+      # Zero out the pg-boss retry backoff (30s doubling in production) so
+      # the outage phase's retries reschedule immediately and only cost poll
+      # pickups.
+      INGEST_RETRY_DELAY_S: "0"
       # Poll the ingest queue at pg-boss's 0.5s floor (default is 2s).
       INGEST_POLL_INTERVAL_S: "0.5"
       # Drain the 7-fixture upload burst in parallel instead of one document
