@@ -38,7 +38,17 @@ Drizzle ORM + Postgres 16, postgres.js driver. Schema lives in
 
 - `npm run db:generate` — diff the schema and emit a new migration into `drizzle/`
 - `npm run db:migrate` — apply pending migrations (host-side; uses `DATABASE_URL` from `.env`)
+- `npm run db:seed` — upsert the biomarker catalog (`src/db/seed/biomarkers.ts`,
+  ~40 analytes with EN+LT aliases and UCUM canonical units) into `biomarkers`;
+  idempotent on slug, safe to re-run
 - `npm run db:studio` — Drizzle Studio UI
+
+Domain modules: `src/lib/units.ts` normalizes as-reported unit strings to UCUM
+and converts values into each biomarker's canonical unit (ucum-lhc for
+commensurable units, the biomarker's molar mass for mol<->mass; `null` when no
+conversion path exists — never guessed). `src/db/repos/biomarker-results.ts`
+holds the results repository (deduping insert, trend series, latest-result
+join) as pure functions taking the drizzle db as their first argument.
 
 Containers apply migrations automatically at start: `web` and `worker` run
 `scripts/migrate.mjs` before booting, and the container refuses to boot if
