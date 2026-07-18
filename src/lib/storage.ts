@@ -188,6 +188,49 @@ export interface OriginalObject {
   contentLength: number | undefined;
 }
 
+export interface OriginalRange {
+  bytes: Uint8Array;
+  /** Total object size, parsed from the Content-Range response header. */
+  totalSize: number | null;
+}
+
+function parseContentRangeTotal(contentRange: string | undefined): number | null {
+  const match = /\/(\d+)$/.exec(contentRange ?? "");
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Read a byte range of an original: `start` inclusive, `end` exclusive (open
+ * when omitted); a NEGATIVE `start` reads the last |start| bytes (S3 suffix
+ * range). The range is fully buffered, so callers must keep ranges small
+ * (magic-byte probes, zip central directories). Returns null when the key
+ * does not exist or the range is unsatisfiable (e.g. an empty object).
+ */
+export async function getOriginalRange(
+  s3Key: string,
+  start: number,
+  end?: number,
+): Promise<OriginalRange | null> {
+  const range =
+    start < 0 ? `bytes=${start}` : `bytes=${start}-${end === undefined ? "" : end - 1}`;
+  const { client, config } = getClient();
+  try {
+    const out = await client.send(
+      new GetObjectCommand({ Bucket: config.bucket, Key: s3Key, Range: range }),
+    );
+    if (!out.Body) return null;
+    const bytes = await (
+      out.Body as unknown as { transformToByteArray(): Promise<Uint8Array> }
+    ).transformToByteArray();
+    return { bytes, totalSize: parseContentRangeTotal(out.ContentRange) };
+  } catch (err) {
+    if (isNotFound(err) || (err as { name?: string }).name === "InvalidRange") {
+      return null;
+    }
+    throw err;
+  }
+}
+
 /** Stream an original, or null when the key does not exist. Never buffers. */
 export async function getOriginalStream(
   s3Key: string,

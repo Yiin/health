@@ -206,6 +206,74 @@ describe("runIngestion", () => {
     expect((await documentRow(id)).status).toBe("done");
   });
 
+  it("halts the pipeline when a stage payload carries a halt marker", async () => {
+    const id = await insertDocument();
+    const calls: IngestionStage[] = [];
+    const stages = countingStages(calls, {
+      classifying: async () => ({
+        promptVersion: "classify-v1",
+        docType: "unknown",
+        halt: { status: "ignored", reason: "unrecognized content" },
+      }),
+    });
+
+    const outcome = await runIngestion(sql, id, { stages });
+
+    expect(outcome).toEqual({
+      kind: "halted",
+      stage: "classifying",
+      status: "ignored",
+    });
+    // Later stages never ran; the halt payload is cached like any other.
+    expect(calls).toEqual(["classifying"]);
+    const doc = await documentRow(id);
+    expect(doc.status).toBe("ignored");
+    expect(doc.stage_error).toBeNull();
+    const rows = await extractionRows(id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].stage).toBe("classifying");
+    expect(rows[0].payload).toMatchObject({ halt: { status: "ignored" } });
+
+    // A halted (terminal) document is skipped by later jobs.
+    expect(await runIngestion(sql, id)).toEqual({
+      kind: "skipped",
+      status: "ignored",
+    });
+  });
+
+  it("resumes past a cached halt when a needs_review document is retried", async () => {
+    const id = await insertDocument();
+    const halting = countingStages([], {
+      classifying: async () => ({
+        docType: "lab_report",
+        halt: { status: "needs_review", reason: "low confidence" },
+      }),
+    });
+    const outcome = await runIngestion(sql, id, { stages: halting });
+    expect(outcome).toEqual({
+      kind: "halted",
+      stage: "classifying",
+      status: "needs_review",
+    });
+    expect((await documentRow(id)).status).toBe("needs_review");
+
+    // Mirror resetDocumentForRetry (src/lib/uploads.ts): back to uploaded,
+    // stage_error cleared, attempts preserved.
+    await sql`
+      update documents set status = 'uploaded', stage_error = null
+      where id = ${id}
+    `;
+
+    const calls: IngestionStage[] = [];
+    const resumed = await runIngestion(sql, id, {
+      stages: countingStages(calls),
+    });
+    expect(resumed).toEqual({ kind: "done" });
+    // classifying was cached from the halted run and is not re-executed.
+    expect(calls).toEqual(["extracting", "normalizing"]);
+    expect((await documentRow(id)).status).toBe("done");
+  });
+
   it("returns missing for an unknown document", async () => {
     expect(await runIngestion(sql, crypto.randomUUID())).toEqual({
       kind: "missing",

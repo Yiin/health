@@ -108,8 +108,22 @@ resuming from persisted state: every finished stage caches its payload in
 re-runs a completed stage, and `documents.status` marks the stage in flight.
 A stage error records `stage_error {stage, message, at}` and rethrows for
 pg-boss to retry; the final attempt lands the document in `failed` instead.
-Stage implementations are stubs for now. SIGTERM stops fetching and lets the
-active job finish (60s grace, then pg-boss requeues it for the next worker).
+SIGTERM stops fetching and lets the active job finish (60s grace, then
+pg-boss requeues it for the next worker).
+
+The classifying stage (`worker/classify.ts`) is real; extracting and
+normalizing remain stubs. Classification is two-layer: a deterministic layer
+(magic bytes via file-type, zip listing markers for Takeout / Apple Health /
+Garmin DI_CONNECT, wearable CSV header shapes) decides without an LLM, and
+only ambiguous containers (PDF, other text) fall back to a Kimi
+`chatStructured` verdict `{docType, language, confidence, summary}`
+(EN+LT system prompt, `CLASSIFY_PROMPT_V1`). Confidence < 0.6 halts the
+pipeline in `needs_review` (recover via the retry endpoint's "Process as…"
+hint, stored as a metadata override the classifier honors); `unknown` halts
+in `ignored` — terminal, stored and searchable, never blocking the queue.
+Verdicts persist `document_type`, `classification_confidence` and
+`ai_summary`, and the cached payload can carry a `halt` marker the executor
+turns into those terminal statuses.
 
 ## Documents library
 

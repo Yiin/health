@@ -8,7 +8,7 @@
  * the shared queue/backoff in ./client.
  */
 
-import { KimiError, kimiFetch, kimiQueue, withBackoff } from "./client";
+import { KimiError, kimiFetch, kimiQueue, withBackoff } from "./client.ts";
 
 /** Kimi rejects files above 100 MB — enforced client-side. */
 export const MAX_FILE_BYTES = 100 * 1024 * 1024;
