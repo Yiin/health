@@ -50,6 +50,25 @@ export const DOCUMENT_STATUSES = [
 ] as const;
 export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 
+// Partition of the state machine: non-terminal means a pipeline run is still
+// in flight (the live feed keeps polling); terminal means it has ended.
+export const NON_TERMINAL_STATUSES = [
+  "uploaded",
+  "classifying",
+  "extracting",
+  "normalizing",
+] as const satisfies readonly DocumentStatus[];
+export const TERMINAL_STATUSES = [
+  "done",
+  "failed",
+  "needs_review",
+  "ignored",
+] as const satisfies readonly DocumentStatus[];
+
+export function isNonTerminalStatus(status: DocumentStatus): boolean {
+  return (NON_TERMINAL_STATUSES as readonly DocumentStatus[]).includes(status);
+}
+
 export interface DocumentStageError {
   stage: string;
   message: string;
