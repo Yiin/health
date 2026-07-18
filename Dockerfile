@@ -3,7 +3,7 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
 # The worker entry lives outside .next, so standalone tracing skips its
 # runtime deps; stage the worker's module closure (from package-lock.json)
 # for the runner to copy in one layer. Keep in sync when the worker's
@@ -50,7 +50,7 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache,sharing=locked npm run build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
