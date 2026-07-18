@@ -27,6 +27,6 @@ CREATE TABLE "biomarkers" (
 );
 --> statement-breakpoint
 ALTER TABLE "biomarker_results" ADD CONSTRAINT "biomarker_results_biomarker_id_biomarkers_id_fk" FOREIGN KEY ("biomarker_id") REFERENCES "public"."biomarkers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "biomarker_results" ADD CONSTRAINT "biomarker_results_document_id_documents_id_fk" FOREIGN KEY ("document_id") REFERENCES "public"."documents"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "biomarker_results_biomarker_date_value_unique" ON "biomarker_results" USING btree ("biomarker_id","measured_on","value_canonical");--> statement-breakpoint
-CREATE INDEX "biomarker_results_biomarker_date_idx" ON "biomarker_results" USING btree ("biomarker_id","measured_on");--> statement-breakpoint
-COMMENT ON COLUMN "biomarker_results"."document_id" IS 'FK to documents.id is added by the documents-data issue (health-etv.12); plain uuid until then.';
+CREATE INDEX "biomarker_results_biomarker_date_idx" ON "biomarker_results" USING btree ("biomarker_id","measured_on");
