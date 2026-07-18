@@ -1,0 +1,2 @@
+ALTER TABLE "documents" DROP CONSTRAINT "documents_status_check";--> statement-breakpoint
+ALTER TABLE "documents" ADD CONSTRAINT "documents_status_check" CHECK ("documents"."status" in ('uploaded','classifying','extracting','normalizing','summarizing','done','failed','needs_review','ignored'));

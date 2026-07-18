@@ -1,12 +1,15 @@
-// Zod schemas + chatStructured JSON Schemas for the lab-report ingestion
-// stages (worker/extract.ts, worker/normalize.ts).
+// Zod schemas + chatStructured JSON Schemas for the ingestion stages
+// (worker/extract.ts, worker/normalize.ts, worker/summarize.ts).
 //
-// Two schema families live here:
+// Three schema families live here:
 //   1. LAB_EXTRACTION — the model's per-document output: collection date, lab
 //      name, and every measured analyte as reported (name/value/unit +
 //      optional reference range and flag).
 //   2. BIOMARKER_MAPPING — the normalization fallback that maps as-reported
 //      analyte names onto biomarkers catalog slugs.
+//   3. DOCUMENT_SUMMARY / POST_INGESTION_INSIGHT — the summarizing stage's
+//      outputs: the per-document ai_summary and the one-shot post-ingestion
+//      insight comparing new lab results against history.
 //
 // The zod schema is the validator (callers own retry/escalation, mirroring
 // the classifier in worker/classify.ts). The JSON Schema is hand-written next
@@ -179,6 +182,63 @@ export const BIOMARKER_MAPPING_JSON_SCHEMA = {
   },
 } as const;
 
+export const documentSummarySchema = z.object({
+  /** 2-4 sentence summary in the document's language or English. */
+  summary: z.string().min(1),
+});
+export type DocumentSummary = z.infer<typeof documentSummarySchema>;
+
+export const DOCUMENT_SUMMARY_JSON_SCHEMA = {
+  name: "document_summary",
+  description:
+    "A 2-4 sentence summary of one health document, in the document's language or English.",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      summary: {
+        type: "string",
+        description:
+          "2-4 sentences: what the document is, provider/date when known, and the key content or findings.",
+      },
+    },
+    required: ["summary"],
+    additionalProperties: false,
+  },
+} as const;
+
+export const postIngestionInsightSchema = z.object({
+  /** Short headline, e.g. "Ferritin down 40% since October, now in range". */
+  title: z.string().min(1),
+  /** Markdown body expanding on the headline (a short paragraph). */
+  body: z.string().min(1),
+});
+export type PostIngestionInsight = z.infer<typeof postIngestionInsightSchema>;
+
+export const POST_INGESTION_INSIGHT_JSON_SCHEMA = {
+  name: "post_ingestion_insight",
+  description:
+    "One insight comparing a newly filed lab report's results against the patient's history.",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      title: {
+        type: "string",
+        description:
+          "Short headline for the most notable change or finding, e.g. 'Ferritin down 40% since October, now in range'.",
+      },
+      body: {
+        type: "string",
+        description:
+          "Markdown body (one short paragraph): what changed vs history, with numbers, direction, and reference-range context.",
+      },
+    },
+    required: ["title", "body"],
+    additionalProperties: false,
+  },
+} as const;
+
 type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 /** JSON.parse + zod validation, with a compact issue list for retry prompts. */
@@ -216,4 +276,16 @@ export function parseBiomarkerMapping(
   raw: string,
 ): ParseResult<BiomarkerMapping> {
   return parseWith(raw, biomarkerMappingSchema);
+}
+
+/** Validates the raw chatStructured JSON string for DOCUMENT_SUMMARY. */
+export function parseDocumentSummary(raw: string): ParseResult<DocumentSummary> {
+  return parseWith(raw, documentSummarySchema);
+}
+
+/** Validates the raw chatStructured JSON string for POST_INGESTION_INSIGHT. */
+export function parsePostIngestionInsight(
+  raw: string,
+): ParseResult<PostIngestionInsight> {
+  return parseWith(raw, postIngestionInsightSchema);
 }

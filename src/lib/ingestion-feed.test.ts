@@ -143,6 +143,7 @@ describe("stageVisuals", () => {
       classifying: "done",
       extracting: "current",
       normalizing: "upcoming",
+      summarizing: "upcoming",
       done: "upcoming",
     });
   });
@@ -163,6 +164,7 @@ describe("stageVisuals", () => {
       classifying: "done",
       extracting: "failed",
       normalizing: "upcoming",
+      summarizing: "upcoming",
       done: "upcoming",
     });
   });

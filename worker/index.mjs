@@ -21,6 +21,7 @@ import {
 import { createClassifyStage } from "./classify.ts";
 import { createExtractStage } from "./extract.ts";
 import { createNormalizeStage } from "./normalize.ts";
+import { createSummarizeStage } from "./summarize.ts";
 import {
   createTakeoutBarrierStage,
   createTakeoutExtractStage,
@@ -53,10 +54,11 @@ function dispatchByType(sql, handlers, fallback) {
  * parent barrier for takeout_archive documents (worker/takeout.ts), the
  * extracting dispatcher for every other type (worker/extract.ts —
  * lab_report and apple_health_export today, more types landing with their
- * own issues), and the real normalizing stage for lab_report documents
+ * own issues), the real normalizing stage for lab_report documents
  * (worker/normalize.ts — other types fall through to it and get its
- * skipped-stub). Built per-worker because the stages close over the sql
- * pool.
+ * skipped-stub), and the summarizing stage (ai_summary + post-ingestion
+ * insight, worker/summarize.ts). Built per-worker because the stages close
+ * over the sql pool.
  */
 export function defaultStages(sql) {
   return {
@@ -72,6 +74,7 @@ export function defaultStages(sql) {
       { takeout_archive: createTakeoutBarrierStage({ sql }) },
       createNormalizeStage({ sql }),
     ),
+    summarizing: createSummarizeStage({ sql }),
   };
 }
 

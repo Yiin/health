@@ -13,6 +13,7 @@ const STATUS_STYLES: Record<DocumentStatus, string> = {
   classifying: "border-sky-400/30 bg-sky-400/10 text-sky-400",
   extracting: "border-sky-400/30 bg-sky-400/10 text-sky-400",
   normalizing: "border-sky-400/30 bg-sky-400/10 text-sky-400",
+  summarizing: "border-sky-400/30 bg-sky-400/10 text-sky-400",
   done: "border-emerald-400/30 bg-emerald-400/10 text-emerald-400",
   failed: "border-red-400/30 bg-red-400/10 text-red-400",
   needs_review: "border-amber-400/30 bg-amber-400/10 text-amber-400",
