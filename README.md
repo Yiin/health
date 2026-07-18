@@ -13,7 +13,7 @@ npm run dev
 ## Tests
 
 ```bash
-docker compose up -d db   # required: publishes Postgres on 127.0.0.1:${DB_PORT:-5433}
+docker compose up -d db minio   # required for the DB and storage integration tests
 npm test
 ```
 
@@ -22,6 +22,10 @@ by `src/db/test-utils.ts` (migrations in `beforeAll`, table truncation in
 `afterEach`) — they never touch dev data. The default connection is
 `postgres://postgres:postgres@localhost:5433/health_test`; set
 `TEST_DATABASE_URL` if your local port or password differ.
+
+Storage tests read MinIO credentials from `.env` and skip cleanly when it is
+absent. They run against the host-published port (`MINIO_PORT`, default 9000)
+and use a dedicated `health-test-w4` bucket.
 
 Other scripts: `npm run lint`, `npm run format`, `npm run build` (produces the standalone
 server in `.next/standalone`).
@@ -52,6 +56,19 @@ migrations fail. Concurrent migrators (web + worker starting together) are
 serialized with a Postgres advisory lock. The script uses drizzle-orm's
 migrator, so the production image needs no dev dependencies.
 
+## File storage
+
+Originals live in MinIO (S3) at content-addressed keys
+`originals/<yyyy>/<mm>/<sha256[:2]>/<sha256>` (`src/lib/storage.ts`), so dedup
+is structural: re-uploading identical bytes is a no-op. v1 has **no
+browser-presigned URLs** — MinIO sits on a Docker-internal hostname that
+tailnet browsers cannot reach, so all uploads and downloads proxy through
+Next.js route handlers with streaming (`GET /api/files/[documentId]`), never
+buffering a whole file in memory.
+
+Per-file cap is **2 GB** (enforced by the upload route). Split Google Takeout
+exports into <=2 GB parts at export time.
+
 ## Basic-auth gate
 
 The app sits behind a drive-by HTTP basic-auth gate (`src/proxy.ts`).
@@ -78,7 +95,7 @@ Services:
 - `worker` — same image, `node worker/index.mjs`, no ports
 - `db` — Postgres 16 (named volume `pgdata`; published on loopback
   `127.0.0.1:${DB_PORT:-5433}` for host-side tooling, unreachable off-host)
-- `minio` — S3-compatible storage (internal only, named volume `miniodata`)
+- `minio` — S3-compatible storage (loopback-only publish on `127.0.0.1:${MINIO_PORT:-9000}` for host-side tests, named volume `miniodata`)
 - `bucket-init` — one-shot job that creates the `S3_BUCKET` bucket
 
 `docker compose down -v` tears everything down including volumes.
@@ -91,4 +108,7 @@ Services:
   MINIO_ROOT_PASSWORD, MOONSHOT_API_KEY, KIMI_MODEL_CHAT, …). On the VPS also set
   `WEB_PORT=3100` — host port 3000 is already taken by the meals app.
 - Exposure is tailnet-only via host Caddy — `web` publishes on loopback
-  (`127.0.0.1:${WEB_PORT:-3000}`), which Caddy proxies. `db`/`minio` publish nothing.
+  (`127.0.0.1:${WEB_PORT:-3000}`), which Caddy proxies. `db` and `minio`
+  publish loopback-only (`127.0.0.1:${DB_PORT:-5433}` and
+  `127.0.0.1:${MINIO_PORT:-9000}`) for host-side tooling/tests — Caddy never
+  proxies them.
