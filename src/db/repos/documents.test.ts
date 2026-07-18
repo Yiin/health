@@ -459,14 +459,17 @@ describe("ai_insights", () => {
   });
 });
 
-// The documents migration adds the biomarker_results.document_id FK only when
-// that table already exists (it is owned by the parallel labs task). Prove
-// the conditional path end-to-end: stub the labs table, apply every migration
-// to a pristine database, and verify ON DELETE SET NULL is enforced.
-describe("biomarker_results FK (conditional)", () => {
-  const FK_DB = "health_test_w8_fk";
+// In the merged migration history 0001_documents lands before the labs
+// migration (0002_silent_tigra), so the conditional DO block in
+// 0001_documents is a no-op on fresh installs and 0002 adds the
+// biomarker_results.document_id FK itself (same constraint name, same
+// ON DELETE SET NULL). Prove the invariant end-to-end: apply every
+// migration to a pristine database and verify the FK exists once and
+// SET NULL is enforced.
+describe("biomarker_results FK", () => {
+  const FK_DB = "health_test_w12_fk";
 
-  test("adds an ON DELETE SET NULL FK when biomarker_results predates the migration", async () => {
+  test("document_id FK exists and ON DELETE SET NULL is enforced", async () => {
     const adminUrl = new URL(TEST_DATABASE_URL);
     adminUrl.pathname = "/postgres";
     const fkUrl = new URL(TEST_DATABASE_URL);
@@ -482,15 +485,6 @@ describe("biomarker_results FK (conditional)", () => {
 
     const conn = postgres(fkUrl.toString(), { max: 1 });
     try {
-      // Minimal stand-in for the labs domain's table.
-      await conn.unsafe(`create extension if not exists pgcrypto`);
-      await conn.unsafe(
-        `create table biomarker_results (
-             id uuid primary key default gen_random_uuid(),
-             document_id uuid
-           )`,
-      );
-
       await migrate(drizzle(conn), { migrationsFolder });
 
       const constraints = await conn<{ conname: string }[]>`
@@ -504,8 +498,15 @@ describe("biomarker_results FK (conditional)", () => {
           values ('fk-test', 'fk.pdf', 'originals/fk/fk-test')
           returning id
         `;
+      const [biomarker] = await conn<{ id: string }[]>`
+          insert into biomarkers (slug, name, category, canonical_unit)
+          values ('fk-test-analyte', 'FK Test Analyte', 'test', 'mg/dL')
+          returning id
+        `;
       await conn`
-          insert into biomarker_results (document_id) values (${doc!.id})
+          insert into biomarker_results
+            (biomarker_id, measured_on, value, unit, document_id)
+          values (${biomarker!.id}, '2026-07-01', 1, 'mg/dL', ${doc!.id})
         `;
       await conn`delete from documents where id = ${doc!.id}`;
 

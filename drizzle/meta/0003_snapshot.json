@@ -1,6 +1,6 @@
 {
-  "id": "4728228d-aa4b-415b-a0fb-9c004d17cd73",
-  "prevId": "58285a58-b7d8-4874-b483-538c1af461cd",
+  "id": "1b9b84b2-8faa-4c85-870e-e399db3e1db1",
+  "prevId": "4728228d-aa4b-415b-a0fb-9c004d17cd73",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -398,6 +398,12 @@
         "extracted_text": {
           "name": "extracted_text",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata_overrides": {
+          "name": "metadata_overrides",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
