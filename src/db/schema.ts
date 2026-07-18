@@ -15,6 +15,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -326,3 +327,62 @@ export const messages = pgTable(
 
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+
+/**
+ * One wearable/self-reported metric value for one day from one source
+ * (LONG/TALL format). The tall shape is deliberate: new metrics need no
+ * migration, and sleep stages are just metrics (sleep_deep_min etc.).
+ * The composite PK makes a (day, metric, source) triple unique — re-imports
+ * upsert the value (last write wins PER SOURCE; cross-source dedup is
+ * deliberately out of scope, the UI picks a preferred source).
+ * Metric names + canonical units: src/db/metric-names.ts.
+ */
+export const dailyMetrics = pgTable(
+  "daily_metrics",
+  {
+    metricOn: date("metric_on", { mode: "string" }).notNull(),
+    metric: text("metric").notNull(),
+    source: text("source").notNull(),
+    value: numeric("value", { mode: "number" }).notNull(),
+    unit: text("unit").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.metricOn, table.metric, table.source] }),
+    index("daily_metrics_metric_on_idx").on(table.metricOn),
+  ],
+);
+
+export type DailyMetric = typeof dailyMetrics.$inferSelect;
+export type NewDailyMetric = typeof dailyMetrics.$inferInsert;
+
+/**
+ * One workout session from one source. Re-imports are deduped by the
+ * (started_at, type, source) unique index. `raw` keeps the unparsed source
+ * record for debugging/re-processing.
+ */
+export const workouts = pgTable(
+  "workouts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    type: text("type").notNull(),
+    durationS: integer("duration_s"),
+    distanceM: numeric("distance_m", { mode: "number" }),
+    calories: integer("calories"),
+    avgHr: integer("avg_hr"),
+    maxHr: integer("max_hr"),
+    source: text("source").notNull(),
+    raw: jsonb("raw").$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    uniqueIndex("workouts_started_type_source_unique").on(
+      table.startedAt,
+      table.type,
+      table.source,
+    ),
+  ],
+);
+
+export type Workout = typeof workouts.$inferSelect;
+export type NewWorkout = typeof workouts.$inferInsert;
