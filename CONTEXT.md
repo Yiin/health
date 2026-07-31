@@ -24,6 +24,42 @@ _Avoid_: Helix sections
 The provider, file, device, or system from which a health record came.
 _Avoid_: Health section
 
+**Source Document**:
+An immutable file or structured payload copied into Health from a Data Source.
+_Avoid_: Health Record, projection
+
+**Import Event**:
+One attempt to add a Source Document to Health through a named adapter.
+_Avoid_: Source Document, sync state
+
+**Source Fact**:
+Data stated directly by a Source Document, kept with its original meaning and location.
+_Avoid_: Health Record, derived fact
+
+**Derived Fact**:
+Data produced by a parser, model, rule, conversion, or Owner action.
+_Avoid_: Source fact
+
+**Health Record**:
+One logical health fact about the Owner across all accepted corrections and source links.
+_Avoid_: Source fact, record revision, projection
+
+**Record Revision**:
+One immutable version of a Health Record.
+_Avoid_: Health Record, edit
+
+**Evidence**:
+A link from a Source Fact or Record Revision to a precise location in a Source Document.
+_Avoid_: Citation text, provenance
+
+**Provenance**:
+The recorded origin and derivation chain for a Source Fact, Record Revision, or Derived Fact.
+_Avoid_: Evidence, source label
+
+**Query Projection**:
+A rebuildable view of accepted Health Records for one query or product surface.
+_Avoid_: Source of truth, Health Record
+
 **Pending Record Candidate**:
 A possible health record that the importer cannot publish safely because its meaning, identity, required data, or evidence remains uncertain.
 _Avoid_: Unconfirmed record, draft fact
