@@ -1,0 +1,1746 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Health Summary contract review</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      const forcedTheme = new URLSearchParams(window.location.search).get("theme");
+      if (forcedTheme === "light" || forcedTheme === "dark") {
+        document.documentElement.dataset.theme = forcedTheme;
+      }
+    </script>
+    <style>
+      * { box-sizing: border-box; min-width: 0; }
+
+      :root {
+        color-scheme: light;
+        --background: #fafafa;
+        --foreground: #27272a;
+        --card: #ffffff;
+        --card-foreground: #27272a;
+        --muted: #f4f4f5;
+        --muted-foreground: #71717a;
+        --accent: #f4f4f5;
+        --accent-foreground: #18181b;
+        --primary: oklch(0.488 0.217 264);
+        --primary-hover: oklch(0.44 0.217 264);
+        --primary-foreground: #ffffff;
+        --border: #e4e4e7;
+        --input: #d4d4d8;
+        --ring: oklch(0.488 0.217 264);
+        --success: #059669;
+        --success-soft: #ecfdf5;
+        --warning: #b45309;
+        --warning-soft: #fffbeb;
+        --danger: #dc2626;
+        --danger-soft: #fef2f2;
+        --info: #2563eb;
+        --info-soft: #eff6ff;
+        --radius: 10px;
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 30px rgb(0 0 0 / 0.04);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --background: #09090b;
+          --foreground: #f4f4f5;
+          --card: #18181b;
+          --card-foreground: #f4f4f5;
+          --muted: #27272a;
+          --muted-foreground: #a1a1aa;
+          --accent: #27272a;
+          --accent-foreground: #fafafa;
+          --primary: oklch(0.588 0.217 264);
+          --primary-hover: oklch(0.64 0.217 264);
+          --primary-foreground: #ffffff;
+          --border: rgb(255 255 255 / 0.08);
+          --input: rgb(255 255 255 / 0.14);
+          --ring: oklch(0.588 0.217 264);
+          --success: #34d399;
+          --success-soft: rgb(6 78 59 / 0.3);
+          --warning: #fbbf24;
+          --warning-soft: rgb(120 53 15 / 0.3);
+          --danger: #f87171;
+          --danger-soft: rgb(127 29 29 / 0.28);
+          --info: #60a5fa;
+          --info-soft: rgb(30 58 138 / 0.3);
+          --shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 12px 40px rgb(0 0 0 / 0.22);
+        }
+      }
+
+      :root[data-theme="light"] {
+        color-scheme: light;
+        --background: #fafafa;
+        --foreground: #27272a;
+        --card: #ffffff;
+        --card-foreground: #27272a;
+        --muted: #f4f4f5;
+        --muted-foreground: #71717a;
+        --accent: #f4f4f5;
+        --accent-foreground: #18181b;
+        --primary: oklch(0.488 0.217 264);
+        --primary-hover: oklch(0.44 0.217 264);
+        --primary-foreground: #ffffff;
+        --border: #e4e4e7;
+        --input: #d4d4d8;
+        --ring: oklch(0.488 0.217 264);
+        --success: #059669;
+        --success-soft: #ecfdf5;
+        --warning: #b45309;
+        --warning-soft: #fffbeb;
+        --danger: #dc2626;
+        --danger-soft: #fef2f2;
+        --info: #2563eb;
+        --info-soft: #eff6ff;
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 30px rgb(0 0 0 / 0.04);
+      }
+
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --background: #09090b;
+        --foreground: #f4f4f5;
+        --card: #18181b;
+        --card-foreground: #f4f4f5;
+        --muted: #27272a;
+        --muted-foreground: #a1a1aa;
+        --accent: #27272a;
+        --accent-foreground: #fafafa;
+        --primary: oklch(0.588 0.217 264);
+        --primary-hover: oklch(0.64 0.217 264);
+        --primary-foreground: #ffffff;
+        --border: rgb(255 255 255 / 0.08);
+        --input: rgb(255 255 255 / 0.14);
+        --ring: oklch(0.588 0.217 264);
+        --success: #34d399;
+        --success-soft: rgb(6 78 59 / 0.3);
+        --warning: #fbbf24;
+        --warning-soft: rgb(120 53 15 / 0.3);
+        --danger: #f87171;
+        --danger-soft: rgb(127 29 29 / 0.28);
+        --info: #60a5fa;
+        --info-soft: rgb(30 58 138 / 0.3);
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 12px 40px rgb(0 0 0 / 0.22);
+      }
+
+      html {
+        scroll-behavior: smooth;
+        background: var(--background);
+      }
+
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--foreground);
+        font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      button,
+      label {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      a:focus-visible,
+      button:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+      }
+
+      code {
+        overflow-wrap: anywhere;
+        word-break: break-all;
+        font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+        font-size: 0.9em;
+      }
+
+      .shell {
+        width: min(1440px, 100%);
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+        gap: 20px;
+        margin-bottom: 24px;
+      }
+
+      .hero-main,
+      .status-panel {
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) + 6px);
+        background: var(--card);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-main {
+        padding: clamp(24px, 5vw, 52px);
+      }
+
+      .status-panel {
+        padding: 22px;
+        align-self: stretch;
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--primary);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        overflow-wrap: anywhere;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: 0;
+        font-size: clamp(32px, 6vw, 62px);
+        line-height: 0.98;
+        letter-spacing: -0.045em;
+      }
+
+      .lede {
+        max-width: 760px;
+        margin: 22px 0 0;
+        color: var(--muted-foreground);
+        font-size: clamp(16px, 2vw, 19px);
+      }
+
+      .scope-note {
+        margin-top: 24px;
+        padding: 14px 16px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--muted);
+        color: var(--muted-foreground);
+      }
+
+      .scope-note strong {
+        color: var(--foreground);
+      }
+
+      .status-title {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .status-copy {
+        margin: 8px 0 18px;
+        color: var(--muted-foreground);
+        font-size: 13px;
+      }
+
+      .progress-track {
+        height: 8px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--muted);
+      }
+
+      .progress-bar {
+        width: 0;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--primary);
+        transition: width 160ms ease-out;
+      }
+
+      .progress-label {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 9px;
+        color: var(--muted-foreground);
+        font-size: 12px;
+      }
+
+      .batch-actions {
+        display: grid;
+        gap: 10px;
+        margin-top: 22px;
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 42px;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 1px solid transparent;
+        border-radius: 9px;
+        padding: 9px 14px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: background-color 120ms ease, border-color 120ms ease, transform 80ms ease;
+      }
+
+      .button:active {
+        transform: scale(0.985);
+      }
+
+      .button-primary {
+        border-color: var(--primary);
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+
+      .button-primary:hover {
+        background: var(--primary-hover);
+      }
+
+      .button-secondary {
+        border-color: var(--input);
+        background: var(--card);
+        color: var(--foreground);
+      }
+
+      .button-secondary:hover {
+        background: var(--accent);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+      }
+
+      .side-nav {
+        position: sticky;
+        top: 18px;
+        display: grid;
+        gap: 4px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) + 2px);
+        background: var(--card);
+      }
+
+      .side-nav a {
+        min-height: 38px;
+        padding: 8px 10px;
+        border-radius: 7px;
+        color: var(--muted-foreground);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .side-nav a:hover {
+        background: var(--accent);
+        color: var(--foreground);
+      }
+
+      .content {
+        display: grid;
+        gap: 42px;
+      }
+
+      .section-head {
+        margin-bottom: 16px;
+      }
+
+      .section-index {
+        color: var(--primary);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      h2 {
+        margin: 4px 0 8px;
+        font-size: clamp(26px, 4vw, 38px);
+        line-height: 1.1;
+        letter-spacing: -0.03em;
+      }
+
+      .section-intro {
+        max-width: 760px;
+        margin: 0;
+        color: var(--muted-foreground);
+      }
+
+      .settled-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .settled-card {
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--card);
+      }
+
+      .settled-card h3 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
+
+      .settled-card p {
+        margin: 0;
+        color: var(--muted-foreground);
+        font-size: 13px;
+      }
+
+      .chart-showcase {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .chart-example {
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--card);
+      }
+
+      .chart-example.recommended {
+        border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent);
+      }
+
+      .chart-example h3 {
+        margin: 0;
+        font-size: 15px;
+      }
+
+      .chart-example p {
+        margin: 7px 0 0;
+        color: var(--muted-foreground);
+        font-size: 12px;
+      }
+
+      .chart {
+        display: block;
+        width: 100%;
+        height: auto;
+        margin-top: 12px;
+        overflow: visible;
+      }
+
+      .chart-axis {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 6px 12px;
+        margin-top: 4px;
+        color: var(--muted-foreground);
+        font-size: 11px;
+      }
+
+      .badge {
+        display: inline-flex;
+        min-height: 23px;
+        align-items: center;
+        border-radius: 999px;
+        padding: 3px 8px;
+        background: var(--info-soft);
+        color: var(--info);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .decision-list,
+      .section-contracts {
+        display: grid;
+        gap: 14px;
+      }
+
+      .decision-card,
+      .contract-card {
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) + 2px);
+        background: var(--card);
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+      }
+
+      .decision-card {
+        padding: clamp(18px, 3vw, 26px);
+      }
+
+      .decision-top,
+      .contract-top {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .question-number {
+        color: var(--primary);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .decision-card h3,
+      .contract-card h3 {
+        margin: 4px 0 0;
+        font-size: 20px;
+        line-height: 1.2;
+      }
+
+      .decision-why {
+        margin: 10px 0 0;
+        color: var(--muted-foreground);
+      }
+
+      .queue-state {
+        flex: none;
+        border-radius: 999px;
+        padding: 4px 9px;
+        background: var(--muted);
+        color: var(--muted-foreground);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      [data-queued="true"] .queue-state {
+        background: var(--success-soft);
+        color: var(--success);
+      }
+
+      .option-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .option {
+        display: flex;
+        min-height: 100%;
+        gap: 10px;
+        padding: 13px;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        cursor: pointer;
+        background: var(--background);
+      }
+
+      .option:hover {
+        border-color: var(--input);
+        background: var(--accent);
+      }
+
+      .option:has(input:checked) {
+        border-color: var(--primary);
+        background: color-mix(in srgb, var(--primary) 7%, var(--card));
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent);
+      }
+
+      .option input {
+        flex: none;
+        width: 18px;
+        height: 18px;
+        margin: 2px 0 0;
+        accent-color: var(--primary);
+      }
+
+      .option strong,
+      .option span {
+        display: block;
+      }
+
+      .option strong {
+        font-size: 14px;
+      }
+
+      .option span {
+        margin-top: 3px;
+        color: var(--muted-foreground);
+        font-size: 12px;
+      }
+
+      .recommended-label {
+        display: inline-flex;
+        width: fit-content;
+        margin-top: 7px;
+        border-radius: 999px;
+        padding: 2px 7px;
+        background: var(--info-soft);
+        color: var(--info);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .notes-field {
+        display: grid;
+        gap: 7px;
+        margin-top: 14px;
+      }
+
+      .notes-field label {
+        color: var(--muted-foreground);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 82px;
+        resize: vertical;
+        border: 1px solid var(--input);
+        border-radius: 9px;
+        padding: 10px 12px;
+        background: var(--background);
+        color: var(--foreground);
+      }
+
+      textarea::placeholder {
+        color: var(--muted-foreground);
+      }
+
+      .form-footer {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .form-hint {
+        color: var(--muted-foreground);
+        font-size: 12px;
+      }
+
+      .contract-card {
+        overflow: hidden;
+      }
+
+      .contract-card details {
+        border-bottom: 1px solid var(--border);
+      }
+
+      .contract-card summary {
+        display: flex;
+        min-height: 64px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 16px 20px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      .contract-card summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .contract-card summary::after {
+        flex: none;
+        content: "+";
+        color: var(--muted-foreground);
+        font-size: 24px;
+        line-height: 1;
+      }
+
+      .contract-card details[open] summary::after {
+        content: "−";
+      }
+
+      .contract-body {
+        padding: 0 20px 20px;
+      }
+
+      .contract-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .contract-part {
+        padding: 13px;
+        border-radius: 9px;
+        background: var(--muted);
+      }
+
+      .contract-part h4 {
+        margin: 0 0 5px;
+        color: var(--muted-foreground);
+        font-size: 11px;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+      }
+
+      .contract-part p {
+        margin: 0;
+        font-size: 13px;
+      }
+
+      .contract-form {
+        padding: 16px 20px 20px;
+      }
+
+      .contract-form .option-grid {
+        margin-top: 0;
+      }
+
+      .decision-callout {
+        margin: 0 0 16px;
+        padding: 14px 16px;
+        border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border));
+        border-radius: var(--radius);
+        background: var(--warning-soft);
+        color: var(--warning);
+      }
+
+      .final-panel {
+        padding: clamp(22px, 4vw, 36px);
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) + 6px);
+        background: var(--card);
+        text-align: center;
+      }
+
+      .final-panel h2 {
+        margin-top: 0;
+      }
+
+      .final-panel p {
+        max-width: 640px;
+        margin: 0 auto 18px;
+        color: var(--muted-foreground);
+      }
+
+      .final-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      .toast {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 20;
+        max-width: min(380px, calc(100vw - 36px));
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--foreground);
+        color: var(--background);
+        box-shadow: var(--shadow);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(10px);
+        transition: opacity 140ms ease, transform 140ms ease;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @media (max-width: 940px) {
+        .hero {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .layout {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .side-nav {
+          position: static;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .side-nav a {
+          text-align: center;
+        }
+
+        .chart-showcase {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          padding: 14px;
+        }
+
+        .settled-grid,
+        .contract-grid,
+        .side-nav {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .hero-main,
+        .status-panel {
+          border-radius: 12px;
+        }
+
+        .contract-card summary,
+        .contract-body,
+        .contract-form {
+          padding-left: 15px;
+          padding-right: 15px;
+        }
+
+        .button {
+          width: 100%;
+        }
+
+        .form-footer {
+          align-items: stretch;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="hero-main">
+          <p class="eyebrow">Wayfinder contract record</p>
+          <h1>Health Summary contract.</h1>
+          <p class="lede">
+            All recommended choices and all fifteen section contracts are approved.
+          </p>
+          <div class="scope-note">
+            <strong>This document plans the Health Summary only.</strong>
+            Storage, upload thresholds, Chat tool safety, responsive layout, and release rules remain in their own Wayfinder tickets.
+          </div>
+        </div>
+        <aside class="status-panel" aria-label="Review progress">
+          <h2 class="status-title">Your review</h2>
+          <p class="status-copy">
+            The approved answers remain selected for reference.
+          </p>
+          <div class="progress-track" aria-hidden="true">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <div class="progress-label">
+            <span id="progress-count">0 queued</span>
+            <span id="progress-total">0 decisions</span>
+          </div>
+          <div class="batch-actions">
+            <button class="button button-secondary" type="button" onclick="queueAll(false)">
+              Queue all answers
+            </button>
+            <button class="button button-primary" type="button" onclick="queueAll(true)">
+              Send all to agent
+            </button>
+          </div>
+        </aside>
+      </section>
+
+      <div class="layout">
+        <nav class="side-nav" aria-label="Document sections">
+          <a href="#settled">Settled rules</a>
+          <a href="#charts">Chart examples</a>
+          <a href="#shared">Shared decisions</a>
+          <a href="#sections">Section contracts</a>
+          <a href="#send">Send answers</a>
+        </nav>
+
+        <div class="content">
+          <section id="settled">
+            <header class="section-head">
+              <span class="section-index">01</span>
+              <h2>Already settled</h2>
+              <p class="section-intro">
+                These decisions came from the live interview. The document does not ask them again.
+              </p>
+            </header>
+            <div class="settled-grid">
+              <article class="settled-card">
+                <h3>One owner</h3>
+                <p>Health stores and displays one person’s private health record.</p>
+              </article>
+              <article class="settled-card">
+                <h3>Fifteen domain sections</h3>
+                <p>Provider names identify data sources. They do not name sections.</p>
+              </article>
+              <article class="settled-card">
+                <h3>Five section states</h3>
+                <p>Every section supports loading, ready, partial, empty, and error states.</p>
+              </article>
+              <article class="settled-card">
+                <h3>Pending candidates stay out</h3>
+                <p>Health Summary hides pending record candidates and links their count to Uploads.</p>
+              </article>
+              <article class="settled-card">
+                <h3>Ranges and goals differ</h3>
+                <p>Measurements use their own dated source ranges. Personal goals stay separate.</p>
+              </article>
+              <article class="settled-card">
+                <h3>Three record actions</h3>
+                <p>Rows open details, show exact source evidence, and attach context to Chat.</p>
+              </article>
+              <article class="settled-card">
+                <h3>Ask never sends</h3>
+                <p>Ask opens Chat with removable context. Lists can attach multiple records.</p>
+              </article>
+              <article class="settled-card">
+                <h3>Stable section links</h3>
+                <p>URL hashes move focus. Scroll tracking does not add browser history entries.</p>
+              </article>
+              <article class="settled-card">
+                <h3>Helix chart foundation</h3>
+                <p>Use Recharts. Keep gaps, use linear clinical lines, and label every data transformation.</p>
+              </article>
+            </div>
+          </section>
+
+          <section id="charts">
+            <header class="section-head">
+              <span class="section-index">02</span>
+              <h2>What happens after the last measurement?</h2>
+              <p class="section-intro">
+                The same visual rule does not fit ferritin, medication status, and an explicit estimate.
+              </p>
+            </header>
+            <div class="chart-showcase">
+              <article class="chart-example recommended">
+                <div class="decision-top">
+                  <h3>Point measurement</h3>
+                  <span class="badge">Recommended</span>
+                </div>
+                <svg class="chart" viewBox="0 0 300 126" role="img" aria-label="A measured point with no line drawn to today">
+                  <line x1="26" y1="99" x2="284" y2="99" stroke="var(--border)" />
+                  <line x1="26" y1="18" x2="26" y2="99" stroke="var(--border)" />
+                  <circle cx="86" cy="54" r="5" fill="var(--primary)" />
+                  <line x1="91" y1="54" x2="268" y2="54" stroke="var(--muted-foreground)" stroke-dasharray="2 8" opacity="0.3" />
+                </svg>
+                <div class="chart-axis"><span>Measured: ferritin 28</span><span>Today</span></div>
+                <p>The card shows 28 and its date. The chart makes no claim after that date.</p>
+              </article>
+              <article class="chart-example recommended">
+                <div class="decision-top">
+                  <h3>Stateful fact</h3>
+                  <span class="badge">Recommended</span>
+                </div>
+                <svg class="chart" viewBox="0 0 300 126" role="img" aria-label="A medication state that continues until its end date">
+                  <line x1="26" y1="99" x2="284" y2="99" stroke="var(--border)" />
+                  <line x1="26" y1="18" x2="26" y2="99" stroke="var(--border)" />
+                  <path d="M55 86 H96 V43 H252 V86" fill="none" stroke="var(--success)" stroke-width="3" />
+                  <circle cx="96" cy="43" r="4" fill="var(--success)" />
+                  <circle cx="252" cy="43" r="4" fill="var(--success)" />
+                </svg>
+                <div class="chart-axis"><span>Started</span><span>Active period</span><span>Ended</span></div>
+                <p>A medication remains active because its record has an effective period.</p>
+              </article>
+              <article class="chart-example">
+                <div class="decision-top">
+                  <h3>Explicit estimate</h3>
+                  <span class="badge">Optional</span>
+                </div>
+                <svg class="chart" viewBox="0 0 300 126" role="img" aria-label="A dashed estimate extending from a measured point">
+                  <line x1="26" y1="99" x2="284" y2="99" stroke="var(--border)" />
+                  <line x1="26" y1="18" x2="26" y2="99" stroke="var(--border)" />
+                  <circle cx="82" cy="60" r="5" fill="var(--primary)" />
+                  <path d="M87 60 C145 61 195 66 263 70" fill="none" stroke="var(--warning)" stroke-width="3" stroke-dasharray="6 6" />
+                </svg>
+                <div class="chart-axis"><span>Measured</span><span>Inferred</span><span>Today</span></div>
+                <p>An estimate is labelled and dashed. It never changes totals, alerts, ranges, or goals.</p>
+              </article>
+            </div>
+            <p class="decision-callout">
+              Helix ends trends at the newest sample and sets connectNulls to false. A missing sample is not zero.
+            </p>
+            <div id="chart-decision"></div>
+          </section>
+
+          <section id="shared">
+            <header class="section-head">
+              <span class="section-index">03</span>
+              <h2>Shared decisions</h2>
+              <p class="section-intro">
+                These rules apply across all fifteen sections. Each option shows its main tradeoff.
+              </p>
+            </header>
+            <div class="decision-list" id="shared-decisions"></div>
+          </section>
+
+          <section id="sections">
+            <header class="section-head">
+              <span class="section-index">04</span>
+              <h2>Section contracts</h2>
+              <p class="section-intro">
+                Open each section. Approve the proposed content or describe a change.
+              </p>
+            </header>
+            <div class="section-contracts" id="section-contracts"></div>
+          </section>
+
+          <section id="send" class="final-panel">
+            <span class="section-index">05</span>
+            <h2>Send the complete review</h2>
+            <p>
+              The send button queues every current choice and sends them to the agent. Notes are optional.
+            </p>
+            <div class="final-actions">
+              <button class="button button-secondary" type="button" onclick="queueAll(false)">
+                Queue all answers
+              </button>
+              <button class="button button-primary" type="button" onclick="queueAll(true)">
+                Send all to agent
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      const continuityDecision = {
+        id: "chart-continuity",
+        title: "How should values continue across time?",
+        why: "This rule separates a latest known value from a claim that the value stayed constant.",
+        options: [
+          {
+            value: "Use typed continuity",
+            title: "Use typed continuity",
+            detail: "Point measurements stop at their date. Stateful facts continue through their effective period. Estimates stay explicit.",
+            recommended: true
+          },
+          {
+            value: "Carry every latest value forward",
+            title: "Carry every value forward",
+            detail: "All charts extend the newest value to today. This is simple, but it can imply measurements that never occurred."
+          },
+          {
+            value: "Never carry any value forward",
+            title: "Never carry values forward",
+            detail: "Every record appears only at its start time. This loses valid state periods for medications and conditions."
+          }
+        ]
+      };
+
+      const sharedDecisions = [
+        {
+          id: "freshness",
+          title: "How should Health show stale values?",
+          why: "A year-old measurement can remain the latest known value without being current.",
+          options: [
+            {
+              value: "Always show date and age; use stale only when cadence is known",
+              title: "Show date and age",
+              detail: "Every current card shows its measurement date and age. A stale warning needs a known source or goal cadence.",
+              recommended: true
+            },
+            {
+              value: "Use one global stale threshold",
+              title: "Use one threshold",
+              detail: "All metrics become stale after the same period. This is easy, but sleep and DEXA need different cadences."
+            },
+            {
+              value: "Never label values stale",
+              title: "Show dates only",
+              detail: "The owner interprets age without a warning. This is quieter, but old values are easier to miss."
+            }
+          ]
+        },
+        {
+          id: "chart-transform",
+          title: "Which values should charts show by default?",
+          why: "High-frequency sources need aggregation. Sparse clinical results need their original points.",
+          options: [
+            {
+              value: "Choose raw or aggregate views by metric and label every transformation",
+              title: "Use metric-specific views",
+              detail: "Labs show original points. Glucose can show readings and daily summaries. Every aggregate states its method.",
+              recommended: true
+            },
+            {
+              value: "Show only raw measurements",
+              title: "Show raw values only",
+              detail: "This preserves every sample, but dense streams become hard to read."
+            },
+            {
+              value: "Smooth every trend",
+              title: "Smooth every chart",
+              detail: "This makes trends calm, but it hides spikes and adds inferred shapes."
+            }
+          ]
+        },
+        {
+          id: "time-window",
+          title: "How should default chart windows work?",
+          why: "One time window cannot fit glucose, sleep, labs, imaging, and travel.",
+          options: [
+            {
+              value: "Use metric-specific defaults and remember the owner’s last choice per section",
+              title: "Use metric defaults",
+              detail: "Glucose opens one day. Daily metrics open 30 days. Sleep opens 90 nights. Sparse records open all time.",
+              recommended: true
+            },
+            {
+              value: "Use 30 days everywhere",
+              title: "Use 30 days everywhere",
+              detail: "Navigation stays consistent, but sparse sections can look empty."
+            },
+            {
+              value: "Always open all time",
+              title: "Use all time",
+              detail: "Nothing is hidden, but dense charts become slow and compressed."
+            }
+          ]
+        },
+        {
+          id: "bands",
+          title: "How should charts show ranges and goals?",
+          why: "A source range and a personal goal can overlap, differ, or apply to different dates.",
+          options: [
+            {
+              value: "Show dated source ranges as neutral bands and personal goals as a separate labelled line or band",
+              title: "Show both distinctly",
+              detail: "The legend names each layer. Historic points use their own source ranges.",
+              recommended: true
+            },
+            {
+              value: "Show only source ranges",
+              title: "Show source ranges only",
+              detail: "The chart stays clinical, but personal targets disappear."
+            },
+            {
+              value: "Show only personal goals",
+              title: "Show goals only",
+              detail: "The chart stays personal, but source context disappears."
+            }
+          ]
+        },
+        {
+          id: "units",
+          title: "Which units should Health display?",
+          why: "Source values must remain exact. The owner can still prefer familiar display units.",
+          options: [
+            {
+              value: "Show preferred units when conversion is reliable; keep source values in details",
+              title: "Prefer owner units",
+              detail: "Cards and charts use preferred units. Details always show the original value, unit, and conversion.",
+              recommended: true
+            },
+            {
+              value: "Always show source units",
+              title: "Use source units",
+              detail: "Nothing is converted, but the same metric can change units across sources."
+            },
+            {
+              value: "Show both units everywhere",
+              title: "Show both units",
+              detail: "Every value is traceable, but cards and charts become dense."
+            }
+          ]
+        },
+        {
+          id: "time-zone",
+          title: "Which time zone should events use?",
+          why: "Sleep, travel, meals, and flights can cross time zones.",
+          options: [
+            {
+              value: "Use event-local time when known; show the stored zone in details",
+              title: "Use event-local time",
+              detail: "A Tokyo sleep stays on its Tokyo night. Details preserve UTC and the source zone.",
+              recommended: true
+            },
+            {
+              value: "Convert everything to Europe/Vilnius",
+              title: "Use owner time",
+              detail: "All times align on one clock, but travel events can move to another calendar day."
+            },
+            {
+              value: "Show event and owner times together",
+              title: "Show both times",
+              detail: "This is explicit, but repeated dual timestamps add noise."
+            }
+          ]
+        },
+        {
+          id: "refresh",
+          title: "How should the summary refresh after data changes?",
+          why: "Uploads, reviews, and confirmed Chat edits can change several sections.",
+          options: [
+            {
+              value: "Refresh affected sections automatically and keep a manual refresh action",
+              title: "Automatic plus manual",
+              detail: "Sections update after saved changes. The page shows its last update time and still offers manual refresh.",
+              recommended: true
+            },
+            {
+              value: "Require manual refresh",
+              title: "Manual only",
+              detail: "The page changes only on request, but saved records can look missing."
+            },
+            {
+              value: "Reload the whole page automatically",
+              title: "Reload the page",
+              detail: "State stays simple, but scroll position and open details can be lost."
+            }
+          ]
+        },
+        {
+          id: "goal-editing",
+          title: "Where should personal goals be edited?",
+          why: "Goals affect cards and chart bands, but they are owner preferences rather than source facts.",
+          options: [
+            {
+              value: "Add and edit goals in the relevant section, with a history of changes",
+              title: "Edit in each section",
+              detail: "The goal stays near its metric. Health keeps effective dates and prior values.",
+              recommended: true
+            },
+            {
+              value: "Edit all goals in one settings page",
+              title: "Use Settings",
+              detail: "Management stays central, but goals are distant from their charts."
+            },
+            {
+              value: "Manage goals only through Chat",
+              title: "Use Chat only",
+              detail: "Natural language is quick, but browsing and correcting goals becomes harder."
+            }
+          ]
+        },
+        {
+          id: "search",
+          title: "What should Summary search include?",
+          why: "The long page needs a fast route to sections, records, and sources.",
+          options: [
+            {
+              value: "Command-K searches sections, published records, and source documents",
+              title: "Search all published content",
+              detail: "Results open the exact section, record detail, or source evidence. Pending candidates stay in Uploads.",
+              recommended: true
+            },
+            {
+              value: "Search sections only",
+              title: "Search navigation only",
+              detail: "The command stays small, but it cannot find one lab or document."
+            },
+            {
+              value: "Do not add Summary search",
+              title: "No search",
+              detail: "The interface stays simpler, but the long record relies on scrolling and filters."
+            }
+          ]
+        }
+      ];
+
+      const sectionContracts = [
+        {
+          id: "section-overview",
+          name: "Overview",
+          summary: "Current values, recent changes, goals, and items that need attention.",
+          parts: {
+            "Metric groups": "Current heart rate, glucose, sleep state, and travel state when available. Trend cards cover steps, VO2 max, resting heart rate, running, ferritin, and owner-pinned metrics.",
+            "Charts": "Small trends use metric-specific windows. They show missing coverage, dated ranges, personal goals, and source freshness.",
+            "Rows and actions": "Goals, source flags, due next actions, and pending review counts open their source section. Record actions use Open details, View source, and Ask Chat.",
+            "Empty state": "Show every group with plain missing-data text. The page offers Upload files, but never suggests provider sync in version one."
+          }
+        },
+        {
+          id: "section-profile",
+          name: "Profile and Vitals",
+          summary: "Identity facts, body measurements, current vitals, and due health actions.",
+          parts: {
+            "Metric groups": "Age, blood type, height, weight, blood pressure, SpO2, BMI when computable, and recovery metrics with suitable sources.",
+            "Charts": "Height, weight, blood pressure, and SpO2 use sparse point charts. Percentiles appear only when a source supplies the cohort and method.",
+            "Rows and actions": "Each fact shows value, measurement date, source, and age. Next actions show due, overdue, completed, or no due date.",
+            "Empty state": "Keep profile, vitals, and next actions visible as separate empty groups. Link to relevant file types in Uploads."
+          }
+        },
+        {
+          id: "section-longitudinal",
+          name: "Longitudinal Record",
+          summary: "A time-first view across lab draws and major clinical landmarks.",
+          parts: {
+            "Metric groups": "Organ-system lanes for laboratory history. Landmarks include encounters, imaging, immunizations, procedures, medication periods, and major conditions.",
+            "Charts": "A horizontally scrollable timeline uses the full available history. Selected comparable markers open a small trend with their own dated ranges.",
+            "Rows and actions": "A landmark or draw opens details with date, record count, source documents, and Ask Chat. Keyboard and touch actions match pointer actions.",
+            "Empty state": "Show the timeline frame and explain that no dated clinical records exist. Offer Upload files."
+          }
+        },
+        {
+          id: "section-labs",
+          name: "Lab Results",
+          summary: "Marker-first laboratory history with exact source ranges and evidence.",
+          parts: {
+            "Metric groups": "Markers group by organ system and panel. Each row shows current value, unit, range status, source interpretation, date, direction, and sample context.",
+            "Charts": "Expanded rows show original points, dated source ranges, personal goals, missing intervals, and a data table. No smoothing runs by default.",
+            "Rows and actions": "System accordions summarize draw history and source flags. Expanded markers list every source document and exact evidence location.",
+            "Empty state": "Show zero markers, zero draws, and supported upload examples. A partial state explains excluded pending candidates."
+          }
+        },
+        {
+          id: "section-daily-health",
+          name: "Daily Health",
+          summary: "Source-neutral daily activity, fitness, recovery, and body metrics.",
+          parts: {
+            "Metric groups": "Steps, VO2 max, weight, resting heart rate, HRV, exercise time, record days, sample counts, and import freshness.",
+            "Charts": "Steps use a 30-day target grid. Other metrics use weekly trends with expandable full history and goal bands.",
+            "Rows and actions": "Each metric expands into history, coverage, contributing sources, imports, and Ask Chat. Source names appear as provenance, not section names.",
+            "Empty state": "Separate no section data from missing dates. Offer file and export uploads, not provider connection."
+          }
+        },
+        {
+          id: "section-sleep",
+          name: "Sleep",
+          summary: "Latest sleep, nightly stages, recovery measures, and source coverage.",
+          parts: {
+            "Metric groups": "Duration, deep, REM, light, HRV, recovery, latency, breathing, SpO2, and temperature measures when supplied.",
+            "Charts": "Show 90 nights by default. Distinguish sources, travel cities, missing nights, and an optional eight-hour personal goal.",
+            "Rows and actions": "A night can be focused, pinned, opened, sourced, or attached to Chat. Metric rows expand into history and goals.",
+            "Empty state": "Distinguish no sleep records, no night record, and a missing source interval."
+          }
+        },
+        {
+          id: "section-glucose",
+          name: "Glucose",
+          summary: "Daily glucose readings, meals, rises, target context, and coverage.",
+          parts: {
+            "Metric groups": "Daily mean, reading count, source target range, meals, unexplained rises, peak change, baseline return time, and incremental area.",
+            "Charts": "Open the latest covered day. Plot readings, target bands, meals, rises, and missing coverage. Previous and next controls skip unavailable dates.",
+            "Rows and actions": "Meals and rises open their contributing readings and evidence. Each item supports View source and Ask Chat.",
+            "Empty state": "Distinguish no glucose data, no readings on one date, and a partial day."
+          }
+        },
+        {
+          id: "section-fitness",
+          name: "Fitness",
+          summary: "Training volume, activity mix, streaks, records, and recent activities.",
+          parts: {
+            "Metric groups": "Distance, duration, elevation, calories, activity mix, weekly streaks, personal bests, and recent activities.",
+            "Charts": "Filter by date range and week or month. Compare distance, duration, and elevation with the prior matching period.",
+            "Rows and actions": "Activities show sport, date, distance, duration, elevation, records, source link, details, and Ask Chat.",
+            "Empty state": "Distinguish no activities from no matches in the selected period or filter."
+          }
+        },
+        {
+          id: "section-clinical",
+          name: "Clinical Record",
+          summary: "Conditions, medications, allergies, procedures, encounters, immunizations, and family history.",
+          parts: {
+            "Metric groups": "Keep each clinical record type separate. Preserve status, dates, dose and adherence, interactions, warnings, monitoring, outcomes, and linked evidence.",
+            "Charts": "Use event timelines and medication effective periods. Link relevant conditions to imaging and comparable laboratory trends.",
+            "Rows and actions": "Accordions show current and historic records. Every item opens details, evidence, related records, and Ask Chat.",
+            "Empty state": "Each record type remains visible with its own no-records state. Never treat missing records as absence of a condition."
+          }
+        },
+        {
+          id: "section-body",
+          name: "Body Composition",
+          summary: "DEXA and other body scans, measurements, comparisons, goals, and source files.",
+          parts: {
+            "Metric groups": "Body fat, lean mass, bone measures, regional measurements, and source-specific scan fields.",
+            "Charts": "Select a scan date, compare it with the prior compatible scan, and chart compatible measures across all scans.",
+            "Rows and actions": "Every measure shows value, unit, dated range or goal, direction, scan source, evidence, and Ask Chat.",
+            "Empty state": "Show no scans and explain accepted source files. Do not create comparisons between incompatible scan methods."
+          }
+        },
+        {
+          id: "section-imaging",
+          name: "Medical Imaging",
+          summary: "Imaging studies, reports, files, findings, and linked clinical records.",
+          parts: {
+            "Metric groups": "Study date, modality, provider, body part, status, series count, file count, report, findings, and related conditions.",
+            "Charts": "No summary chart is required. The viewer supports images, PDFs, DICOM series, cine playback, finding jumps, and linked-study comparison.",
+            "Rows and actions": "Study accordions open the viewer. Findings link to frames when available. Reports and original files remain downloadable.",
+            "Empty state": "Show no imaging studies and supported upload types. A study with missing files uses a local error and retry state."
+          }
+        },
+        {
+          id: "section-supplements",
+          name: "Supplements",
+          summary: "Active and stopped products, ingredients, doses, labels, and nutrient totals.",
+          parts: {
+            "Metric groups": "Product name, status, ingredients, strength, dose, schedule, effective period, label data, and combined nutrient totals.",
+            "Charts": "Use effective-period timelines only when history exists. Nutrient totals show source products and never imply clinical adequacy.",
+            "Rows and actions": "Products expand into labels, ingredients, dates, purchase links, source photos, details, and Ask Chat.",
+            "Empty state": "Keep active, stopped, and nutrient groups visible. Offer supplement label or export uploads."
+          }
+        },
+        {
+          id: "section-timeline",
+          name: "Health Timeline",
+          summary: "A readable event feed across the entire health record.",
+          parts: {
+            "Metric groups": "Medical, treatment, vital, fitness, upload, and owner-confirmed change events.",
+            "Charts": "Use a vertical event timeline filtered by year and category. This section does not duplicate the organ-lane chart.",
+            "Rows and actions": "Events expand in place and link to their source section, record detail, evidence viewer, external source, or Ask Chat.",
+            "Empty state": "Distinguish no events from no events in the selected year or category."
+          }
+        },
+        {
+          id: "section-cheatsheets",
+          name: "Cheatsheets",
+          summary: "Printable owner-only summaries for appointments, travel, and daily use.",
+          parts: {
+            "Metric groups": "Sheet title, purpose, template, effective date, last update, included record references, and live or archived state.",
+            "Charts": "A preview card and large print preview show the final output. Sheets use current published records at render time unless frozen.",
+            "Rows and actions": "Create, preview, print, archive, restore, duplicate, and Ask Chat. Public share and unshare actions do not exist in version one.",
+            "Empty state": "Show suggested owner-only templates without creating a sheet automatically."
+          }
+        },
+        {
+          id: "section-travel",
+          name: "Travel",
+          summary: "Flights, travel totals, upcoming trips, and recent travel context.",
+          parts: {
+            "Metric groups": "Flight count, distance, hours, airports, countries, busiest year, upcoming flights, and recent flights.",
+            "Charts": "Use yearly totals and route summaries when enough data exists. Sleep can use travel-city overlays through linked records.",
+            "Rows and actions": "Exclusive accordions cover airlines, airports, routes, and aircraft. Flight rows show route, number, dates, duration, distance, source, and Ask Chat.",
+            "Empty state": "Distinguish no flights from no upcoming flights. Offer supported export uploads."
+          }
+        }
+      ];
+
+      const escapeHtml = (value) =>
+        String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+
+      const optionHtml = (questionId, option, index) => `
+        <label class="option">
+          <input
+            type="radio"
+            name="answer"
+            value="${escapeHtml(option.value)}"
+            ${option.recommended ? "checked" : ""}
+            ${!option.recommended && index === 0 ? "checked" : ""}
+          />
+          <span>
+            <strong>${escapeHtml(option.title)}</strong>
+            <span>${escapeHtml(option.detail)}</span>
+            ${option.recommended ? '<span class="recommended-label">Recommended</span>' : ""}
+          </span>
+        </label>
+      `;
+
+      const decisionHtml = (decision, index, prefix = "Decision") => `
+        <form
+          class="decision-card review-form"
+          id="${escapeHtml(decision.id)}"
+          data-qid="${escapeHtml(decision.id)}"
+          data-title="${escapeHtml(decision.title)}"
+          data-kind="shared"
+          data-queued="false"
+          data-lavish-question="${escapeHtml(decision.id)}"
+          onsubmit="queueForm(event)"
+        >
+          <div class="decision-top">
+            <div>
+              <span class="question-number">${escapeHtml(prefix)} ${String(index + 1).padStart(2, "0")}</span>
+              <h3>${escapeHtml(decision.title)}</h3>
+            </div>
+            <span class="queue-state">Not queued</span>
+          </div>
+          <p class="decision-why">${escapeHtml(decision.why)}</p>
+          <div class="option-grid">
+            ${decision.options.map((option, optionIndex) => optionHtml(decision.id, option, optionIndex)).join("")}
+          </div>
+          <div class="notes-field">
+            <label for="${escapeHtml(decision.id)}-notes">Notes or a different rule</label>
+            <textarea
+              id="${escapeHtml(decision.id)}-notes"
+              name="notes"
+              placeholder="Optional. Add a condition, example, or alternative."
+            ></textarea>
+          </div>
+          <div class="form-footer">
+            <span class="form-hint">Queueing again replaces the unsent answer for this question.</span>
+            <button class="button button-secondary" type="submit">Queue this answer</button>
+          </div>
+        </form>
+      `;
+
+      const contractPartsText = (contract) =>
+        Object.entries(contract.parts)
+          .map(([label, value]) => `${label}: ${value}`)
+          .join(" ");
+
+      const contractHtml = (contract, index) => `
+        <article
+          class="contract-card review-form"
+          id="${escapeHtml(contract.id)}"
+          data-qid="${escapeHtml(contract.id)}"
+          data-title="${escapeHtml(contract.name)}"
+          data-kind="section"
+          data-contract="${escapeHtml(contractPartsText(contract))}"
+          data-queued="false"
+          data-lavish-question="${escapeHtml(contract.id)}"
+        >
+          <details ${index < 2 ? "open" : ""}>
+            <summary>
+              <div>
+                <span class="question-number">Section ${String(index + 1).padStart(2, "0")}</span>
+                <h3>${escapeHtml(contract.name)}</h3>
+              </div>
+              <span class="queue-state">Not queued</span>
+            </summary>
+            <div class="contract-body">
+              <p class="decision-why">${escapeHtml(contract.summary)}</p>
+              <div class="contract-grid">
+                ${Object.entries(contract.parts).map(([label, value]) => `
+                  <div class="contract-part">
+                    <h4>${escapeHtml(label)}</h4>
+                    <p>${escapeHtml(value)}</p>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          </details>
+          <form class="contract-form" onsubmit="queueForm(event)">
+            <div class="option-grid">
+              <label class="option">
+                <input type="radio" name="answer" value="Approve the proposed contract" checked />
+                <span>
+                  <strong>Approve this contract</strong>
+                  <span>Use the proposed metric groups, charts, actions, and empty state.</span>
+                  <span class="recommended-label">Recommended</span>
+                </span>
+              </label>
+              <label class="option">
+                <input type="radio" name="answer" value="Change the proposed contract" />
+                <span>
+                  <strong>Change this contract</strong>
+                  <span>Keep the section, but apply the changes in the notes.</span>
+                </span>
+              </label>
+            </div>
+            <div class="notes-field">
+              <label for="${escapeHtml(contract.id)}-notes">Changes or examples</label>
+              <textarea
+                id="${escapeHtml(contract.id)}-notes"
+                name="notes"
+                placeholder="Optional. State exactly what should change."
+              ></textarea>
+            </div>
+            <div class="form-footer">
+              <span class="form-hint">The full proposed contract is included with your answer.</span>
+              <button class="button button-secondary" type="submit">Queue this section</button>
+            </div>
+          </form>
+        </article>
+      `;
+
+      function restoreForm(wrapper) {
+        const key = `health-summary-review:${wrapper.dataset.qid}`;
+        const stored = localStorage.getItem(key);
+        if (!stored) return;
+        try {
+          const state = JSON.parse(stored);
+          const form = wrapper.matches("form") ? wrapper : wrapper.querySelector("form");
+          const radio = [...form.querySelectorAll('input[name="answer"]')]
+            .find((input) => input.value === state.answer);
+          if (radio) radio.checked = true;
+          const notes = form.querySelector('textarea[name="notes"]');
+          if (notes && typeof state.notes === "string") notes.value = state.notes;
+        } catch {
+          localStorage.removeItem(key);
+        }
+      }
+
+      function saveForm(wrapper) {
+        const form = wrapper.matches("form") ? wrapper : wrapper.querySelector("form");
+        const data = new FormData(form);
+        localStorage.setItem(
+          `health-summary-review:${wrapper.dataset.qid}`,
+          JSON.stringify({
+            answer: data.get("answer"),
+            notes: data.get("notes") || ""
+          })
+        );
+      }
+
+      function markChanged(wrapper) {
+        wrapper.dataset.queued = "false";
+        const state = wrapper.querySelector(".queue-state");
+        if (state) state.textContent = "Not queued";
+        saveForm(wrapper);
+        updateProgress();
+      }
+
+      function queueWrapper(wrapper) {
+        const form = wrapper.matches("form") ? wrapper : wrapper.querySelector("form");
+        const data = new FormData(form);
+        const answer = data.get("answer");
+        const notes = String(data.get("notes") || "").trim();
+        if (!answer) {
+          showToast(`Choose an answer for ${wrapper.dataset.title}.`);
+          return false;
+        }
+
+        const isSection = wrapper.dataset.kind === "section";
+        const title = wrapper.dataset.title;
+        const contract = wrapper.dataset.contract || "";
+        const message = isSection
+          ? `Health Summary section "${title}": ${answer}. Proposed contract: ${contract}${notes ? ` Changes or notes: ${notes}` : ""}`
+          : `Health Summary decision "${title}": ${answer}.${notes ? ` Notes: ${notes}` : ""}`;
+
+        if (!window.lavish || typeof window.lavish.queuePrompt !== "function") {
+          showToast("Open this document through Lavish to queue answers.");
+          return false;
+        }
+
+        window.lavish.queuePrompt(message, {
+          tag: isSection ? "section-contract" : "health-summary-decision",
+          text: `${title}: ${answer}`,
+          element: wrapper,
+          queueKey: `health-summary:${wrapper.dataset.qid}`,
+          data: {
+            question: wrapper.dataset.qid,
+            title,
+            answer,
+            notes,
+            proposedContract: isSection ? contract : undefined
+          }
+        });
+
+        wrapper.dataset.queued = "true";
+        const state = wrapper.querySelector(".queue-state");
+        if (state) state.textContent = "Queued";
+        saveForm(wrapper);
+        updateProgress();
+        return true;
+      }
+
+      function queueForm(event) {
+        event.preventDefault();
+        const wrapper = event.currentTarget.closest(".review-form");
+        if (queueWrapper(wrapper)) showToast(`Queued: ${wrapper.dataset.title}`);
+      }
+
+      function queueAll(send) {
+        const wrappers = [...document.querySelectorAll(".review-form")];
+        const allQueued = wrappers.every(queueWrapper);
+        if (!allQueued) return;
+        showToast(send ? "Sending all answers to the agent." : "All answers are queued.");
+        if (send && window.lavish && typeof window.lavish.sendQueuedPrompts === "function") {
+          window.setTimeout(() => window.lavish.sendQueuedPrompts(), 120);
+        }
+      }
+
+      function updateProgress() {
+        const wrappers = [...document.querySelectorAll(".review-form")];
+        const queued = wrappers.filter((wrapper) => wrapper.dataset.queued === "true").length;
+        const total = wrappers.length;
+        document.getElementById("progress-count").textContent = `${queued} queued`;
+        document.getElementById("progress-total").textContent = `${total} decisions`;
+        document.getElementById("progress-bar").style.width = total ? `${(queued / total) * 100}%` : "0%";
+      }
+
+      let toastTimer;
+      function showToast(message) {
+        const toast = document.getElementById("toast");
+        toast.textContent = message;
+        toast.classList.add("show");
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => toast.classList.remove("show"), 2400);
+      }
+
+      document.getElementById("chart-decision").innerHTML = decisionHtml(continuityDecision, 0, "Chart decision");
+      document.getElementById("shared-decisions").innerHTML = sharedDecisions
+        .map((decision, index) => decisionHtml(decision, index))
+        .join("");
+      document.getElementById("section-contracts").innerHTML = sectionContracts
+        .map((contract, index) => contractHtml(contract, index))
+        .join("");
+
+      document.querySelectorAll(".review-form").forEach((wrapper) => {
+        restoreForm(wrapper);
+        const form = wrapper.matches("form") ? wrapper : wrapper.querySelector("form");
+        form.addEventListener("change", () => markChanged(wrapper));
+        form.addEventListener("input", () => markChanged(wrapper));
+      });
+
+      updateProgress();
+
+      const reviewParams = new URLSearchParams(window.location.search);
+      const auditWidth = Number(reviewParams.get("auditWidth"));
+      if (Number.isFinite(auditWidth) && auditWidth >= 320) {
+        document.body.style.width = `${auditWidth}px`;
+        document.body.style.maxWidth = `${auditWidth}px`;
+      }
+
+      if (reviewParams.has("audit")) {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const failures = [...document.querySelectorAll("*")]
+            .filter((element) => {
+              const overflowX = getComputedStyle(element).overflowX;
+              const intentionallyScrollable = overflowX === "auto" || overflowX === "scroll";
+              return !intentionallyScrollable && element.scrollWidth > element.clientWidth + 1;
+            })
+            .map((element) => ({
+              selector: element.id
+                ? `#${element.id}`
+                : `${element.tagName.toLowerCase()}.${[...element.classList].join(".")}`,
+              clientWidth: element.clientWidth,
+              scrollWidth: element.scrollWidth
+            }));
+          const result = {
+            viewportWidth: document.documentElement.clientWidth,
+            documentClientWidth: document.documentElement.clientWidth,
+            documentScrollWidth: document.documentElement.scrollWidth,
+            targetWidth: auditWidth || null,
+            bodyClientWidth: document.body.clientWidth,
+            bodyScrollWidth: document.body.scrollWidth,
+            failures
+          };
+          const output = document.createElement("pre");
+          output.id = "audit-results";
+          output.textContent = JSON.stringify(result);
+          document.body.replaceChildren(output);
+        }));
+      }
+    </script>
+  </body>
+</html>
