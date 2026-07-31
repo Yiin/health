@@ -118,3 +118,17 @@ _Avoid_: Carry every latest value forward
 The age of the latest known value, shown with its measurement date.
 Health labels a value stale only when it knows the expected source or goal cadence.
 _Avoid_: One global stale threshold
+
+**Context Reference**:
+A stable pointer that attaches a Health Record, Record Revision, Evidence item, or Health Section to one Chat turn.
+_Avoid_: Pasted record text, prompt context
+
+**Change Proposal**:
+An immutable, validated change that Chat presents for Owner confirmation.
+It names the expected current revision and makes no record change by itself.
+_Avoid_: Chat edit, pending write
+
+**Confirmation**:
+The Owner's separate interface action that accepts one exact Change Proposal.
+A message such as "yes" is not Confirmation.
+_Avoid_: Chat agreement, model approval

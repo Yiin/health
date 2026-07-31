@@ -419,11 +419,11 @@ Pointer-opened search can use the T3 Code 200-millisecond transition.
 
 Ask Chat uses the T3 Code chat surface and composer.
 
-Attached record context appears as removable chips.
+Attached Context References appear as removable chips.
 The chips show record type, label, date, and source.
 
 Ask Chat never sends automatically.
-Chat history preserves attached record references.
+Chat history preserves attached Context References.
 
 On wide desktop screens, Chat can open in a right panel.
 On smaller screens, Chat opens as its main surface.

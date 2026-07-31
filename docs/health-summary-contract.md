@@ -52,11 +52,11 @@ A row offers Open details, View source, and Ask Chat.
 View source opens the exact evidence location inside Health.
 Original download remains a secondary action.
 
-Ask Chat attaches removable structured record references.
+Ask Chat attaches removable Context References.
 It opens Chat and never sends automatically.
 
-Summary cards attach one record.
-Record lists support multi-select attachment.
+Summary cards attach one Context Reference.
+Record lists support multiple Context References.
 
 ## Range and goal meaning
 
