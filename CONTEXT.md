@@ -32,6 +32,11 @@ _Avoid_: Health Record, projection
 One attempt to add a Source Document to Health through a named adapter.
 _Avoid_: Source Document, sync state
 
+**Processing Run**:
+One versioned execution that turns a Source Document into Source Facts and Record Candidates.
+A retry continues the run. Reprocessing starts a new run.
+_Avoid_: Import Event, queue job
+
 **Source Fact**:
 Data stated directly by a Source Document, kept with its original meaning and location.
 _Avoid_: Health Record, derived fact
@@ -48,6 +53,18 @@ _Avoid_: Source fact, record revision, projection
 One immutable version of a Health Record.
 _Avoid_: Health Record, edit
 
+**Record Candidate**:
+A proposed Record Revision that Health has not accepted or rejected.
+_Avoid_: Source Fact, draft projection
+
+**Pending Record Candidate**:
+A Record Candidate waiting for Owner review because Health cannot publish it safely.
+_Avoid_: Unconfirmed record, draft fact
+
+**Publish**:
+Accept a Record Candidate as a Record Revision and make it available to Query Projections.
+_Avoid_: Upload, display, index
+
 **Evidence**:
 A link from a Source Fact or Record Revision to a precise location in a Source Document.
 _Avoid_: Citation text, provenance
@@ -59,10 +76,6 @@ _Avoid_: Evidence, source label
 **Query Projection**:
 A rebuildable view of accepted Health Records for one query or product surface.
 _Avoid_: Source of truth, Health Record
-
-**Pending Record Candidate**:
-A possible health record that the importer cannot publish safely because its meaning, identity, required data, or evidence remains uncertain.
-_Avoid_: Unconfirmed record, draft fact
 
 **Reference Range**:
 The interval supplied for one measurement by its source, including its unit and applicable context.
