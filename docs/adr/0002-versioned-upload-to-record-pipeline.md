@@ -66,7 +66,7 @@ Classification uses this order:
 
 An override selects an adapter. It does not bypass scanning, parsing checks, or publication rules.
 
-AI classification can continue automatically at a calibrated score of 0.80 or more. A lower score creates a review item. An `unknown` result stays visible as unsupported and publishes no records.
+AI classification can continue automatically at a calibrated score of 0.80 or more. A lower score creates a review item. An `unknown` result parks the document in Owner review (`needs_owner_review`) and publishes no records.
 
 Each adapter records its name, version, schema version, configuration version, and code digest. Provider adapters map into the common record envelope. They keep fields that the common model does not yet understand.
 
@@ -139,10 +139,12 @@ The Import Event uses these terminal results:
 
 - `complete`: all valid candidates were published or rejected by policy.
 - `complete_with_review`: at least one candidate needs Owner review.
-- `unsupported`: the file is safe but has no supported adapter.
+- `needs_owner_review`: the file is safe but Health cannot read or label it yet; its bytes are retained and it can be reprocessed later.
 - `rejected`: scanning or structural validation rejected the file.
 - `failed`: processing stopped after its retry budget.
 - `deleted`: the purge finished.
+
+Amendment (health-3fq.21): `unsupported` was a terminal failure result, which contradicted "no legitimate document is ever rejected or discarded." It is renamed to `needs_owner_review` and dropped from the Processing Run error class set: a held run succeeds with `error_class` null and a `hold_reason` recorded, it never fails.
 
 Each stage records `queued`, `running`, `waiting`, `retrying`, `succeeded`, `failed`, or `cancelled`. It also records start time, finish time, attempt count, error class, and work counters.
 
