@@ -54,3 +54,7 @@ issue-prefix: "health"
 # - github.repo
 
 sync.remote: "git+ssh://git@github.com/Yiin/health.git"
+dolt:
+    host: "100.107.50.39"
+    port: 3306
+    user: "root"
